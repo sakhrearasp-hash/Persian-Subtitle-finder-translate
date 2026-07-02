@@ -1,7 +1,6 @@
 import express from "express";
 import path from "path";
 import { createServer as createViteServer } from "vite";
-import { GoogleGenAI, Type } from "@google/genai";
 import dotenv from "dotenv";
 
 dotenv.config();
@@ -13,20 +12,13 @@ const PORT = 3000;
 app.use(express.json({ limit: "20mb" }));
 app.use(express.urlencoded({ extended: true, limit: "20mb" }));
 
-// Helper to initialize Gemini Client with dynamic/custom or environment key
-function getGeminiClient(customKey?: string) {
-  const key = customKey || process.env.GEMINI_API_KEY;
+// Helper to retrieve the Groq API key
+function getGroqApiKey(customKey?: string) {
+  const key = customKey || process.env.GROQ_API_KEY;
   if (!key) {
-    throw new Error("کلید API یافت نشد. لطفاً در پنل تنظیمات کلید معتبر وارد کنید.");
+    throw new Error("کلید API یافت نشد. لطفاً در پنل تنظیمات کلید معتبر Groq وارد کنید.");
   }
-  return new GoogleGenAI({
-    apiKey: key,
-    httpOptions: {
-      headers: {
-        "User-Agent": "aistudio-build",
-      },
-    },
-  });
+  return key;
 }
 
 // 1. Healthcheck Endpoint
@@ -38,15 +30,36 @@ app.get("/api/health", (req, res) => {
 app.post("/api/validate-key", async (req, res) => {
   try {
     const { customKey } = req.body;
-    const ai = getGeminiClient(customKey);
+    const apiKey = getGroqApiKey(customKey);
     
-    // Perform a tiny test request to confirm key validity
-    await ai.models.generateContent({
-      model: "gemini-1.5-flash",
-      contents: "Respond with the word: ok",
+    const response = await fetch("https://api.groq.com/openai/v1/chat/completions", {
+      method: "POST",
+      headers: {
+        "Authorization": `Bearer ${apiKey}`,
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify({
+        model: "llama-3.1-8b-instant",
+        messages: [
+          { role: "user", content: "Respond with the word: ok" }
+        ],
+        max_tokens: 5
+      })
     });
 
-    return res.json({ success: true, message: "کلید Gemini معتبر است و با موفقیت متصل شد." });
+    if (!response.ok) {
+      const errText = await response.text();
+      let errMsg = "کلید وارد شده معتبر نمی‌باشد یا خطایی در اتصال رخ داده است.";
+      try {
+        const parsed = JSON.parse(errText);
+        if (parsed.error && parsed.error.message) {
+          errMsg = parsed.error.message;
+        }
+      } catch (e) {}
+      return res.status(400).json({ success: false, error: errMsg });
+    }
+
+    return res.json({ success: true, message: "کلید Groq با موفقیت سنجش شد و متصل گردید." });
   } catch (error: any) {
     console.error("Error validating API key:", error);
     return res.status(400).json({ 
@@ -56,52 +69,57 @@ app.post("/api/validate-key", async (req, res) => {
   }
 });
 
-// 2. Search and retrieve matching subtitles using Gemini (for authentic dialogues!)
+// 2. Search and retrieve matching subtitles using Groq
 app.post("/api/search-subtitles", async (req, res) => {
   try {
-    const { movieName, customKey } = req.body;
+    const { movieName, customKey, model } = req.body;
     if (!movieName) {
       return res.status(400).json({ error: "لطفاً نام فیلم را وارد کنید." });
     }
 
-    const ai = getGeminiClient(customKey);
-    
-    // Call Gemini to generate highly realistic dialogue lines for the searched film/video.
-    // This gives an amazing full-fledged feel where any search works seamlessly!
+    const apiKey = getGroqApiKey(customKey);
+    const selectedModel = model || "llama-3.3-70b-versatile";
+
     const prompt = `Generate 8 consecutive, iconic dialogue lines from the movie or video named "${movieName}".
-    Return them as a JSON array of subtitle objects in the original language of the film.
-    Each object must strictly have:
+    Return them as a JSON object with a "lines" key containing an array of subtitle objects in the original language of the film.
+    Each object inside the "lines" array must strictly have:
     - id (number, starting from 1)
     - startTime (string in subtitle timestamp format 'HH:MM:SS,mmm' e.g. '00:05:12,400')
     - endTime (string in subtitle timestamp format 'HH:MM:SS,mmm' e.g. '00:05:15,150')
     - text (string, the original dialogue text)`;
 
-    const response = await ai.models.generateContent({
-      model: "gemini-1.5-flash",
-      contents: prompt,
-      config: {
-        systemInstruction: "You are an expert film database and subtitle collector. Generate realistic, contextually connected lines of subtitles for any specified film in its original language.",
-        responseMimeType: "application/json",
-        responseSchema: {
-          type: Type.ARRAY,
-          items: {
-            type: Type.OBJECT,
-            properties: {
-              id: { type: Type.INTEGER },
-              startTime: { type: Type.STRING },
-              endTime: { type: Type.STRING },
-              text: { type: Type.STRING }
-            },
-            required: ["id", "startTime", "endTime", "text"]
+    const response = await fetch("https://api.groq.com/openai/v1/chat/completions", {
+      method: "POST",
+      headers: {
+        "Authorization": `Bearer ${apiKey}`,
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify({
+        model: selectedModel,
+        messages: [
+          {
+            role: "system",
+            content: "You are an expert film database and subtitle collector. Generate realistic, contextually connected lines of subtitles for any specified film in its original language. You must strictly output valid JSON containing a 'lines' key."
+          },
+          {
+            role: "user",
+            content: prompt
           }
-        }
-      }
+        ],
+        response_format: { type: "json_object" }
+      })
     });
 
-    const text = response.text || "[]";
-    const parsedLines = JSON.parse(text);
+    if (!response.ok) {
+      const errText = await response.text();
+      return res.status(500).json({ error: `Groq API Error: ${errText}` });
+    }
 
-    // Let's formulate a list of subtitle result versions
+    const data = await response.json();
+    const content = data.choices?.[0]?.message?.content || "{}";
+    const parsedData = JSON.parse(content);
+    const parsedLines = parsedData.lines || [];
+
     res.json({
       success: true,
       movie: movieName,
@@ -140,14 +158,14 @@ app.post("/api/search-subtitles", async (req, res) => {
 // 3. AI translation endpoint
 app.post("/api/translate-subtitles", async (req, res) => {
   try {
-    const { subtitles, customKey, contextMode, localizationMode } = req.body;
+    const { subtitles, customKey, model } = req.body;
     if (!subtitles || !Array.isArray(subtitles) || subtitles.length === 0) {
       return res.status(400).json({ error: "لیست زیرنویس‌ها خالی است." });
     }
 
-    const ai = getGeminiClient(customKey);
+    const apiKey = getGroqApiKey(customKey);
+    const selectedModel = model || "llama-3.3-70b-versatile";
 
-    // Formulate a prompt list
     const subtitleLinesPrompt = subtitles.map((s: any) => `Line ${s.id}: "${s.text}"`).join("\n");
     
     const systemInstruction = `You are a professional cinematic subtitle translator and localization engine.
@@ -160,35 +178,46 @@ CRITICAL RULES:
 4. Translate in CONTEXT-AWARE mode (not literal translation). Understand dialogue as part of a scene, preserving emotional tone, sarcasm, humor, and tension.
 5. Maintain character voice consistency and keep names, places, and proper nouns consistent.
 6. The output must be natural Iranian spoken Persian (not formal/book language) of movie-quality localization (like professional Netflix dubbing subtitles).
-7. Return the response STRICTLY as a JSON array of objects with keys 'id' (integer matching the input) and 'translatedText' (string). Do not include any explanations or markdown outside the JSON structure.
+7. Return the response STRICTLY as a JSON object with a 'translations' key containing an array of objects with keys 'id' (integer matching the input) and 'translatedText' (string). Do not include any explanations or markdown outside the JSON structure.
 
 Response JSON Schema structure:
-[
-  { "id": 1, "translatedText": "متن ترجمه شده به فارسی روان" }
-]`;
+{
+  "translations": [
+    { "id": 1, "translatedText": "متن ترجمه شده به فارسی روان" }
+  ]
+}`;
 
-    const response = await ai.models.generateContent({
-      model: "gemini-1.5-flash",
-      contents: `Translate the following consecutive subtitle lines using the 2-3 line semantic chunking strategy:\n\n${subtitleLinesPrompt}`,
-      config: {
-        systemInstruction,
-        responseMimeType: "application/json",
-        responseSchema: {
-          type: Type.ARRAY,
-          items: {
-            type: Type.OBJECT,
-            properties: {
-              id: { type: Type.INTEGER },
-              translatedText: { type: Type.STRING }
-            },
-            required: ["id", "translatedText"]
+    const response = await fetch("https://api.groq.com/openai/v1/chat/completions", {
+      method: "POST",
+      headers: {
+        "Authorization": `Bearer ${apiKey}`,
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify({
+        model: selectedModel,
+        messages: [
+          {
+            role: "system",
+            content: systemInstruction
+          },
+          {
+            role: "user",
+            content: `Translate the following consecutive subtitle lines using the 2-3 line semantic chunking strategy:\n\n${subtitleLinesPrompt}`
           }
-        }
-      }
+        ],
+        response_format: { type: "json_object" }
+      })
     });
 
-    const responseText = response.text || "[]";
-    const translatedResults = JSON.parse(responseText);
+    if (!response.ok) {
+      const errText = await response.text();
+      return res.status(500).json({ error: `Groq API Error: ${errText}` });
+    }
+
+    const data = await response.json();
+    const content = data.choices?.[0]?.message?.content || "{}";
+    const parsedData = JSON.parse(content);
+    const translatedResults = parsedData.translations || [];
 
     // Merge translated text back into the subtitles list
     const translatedSubtitles = subtitles.map((original: any) => {

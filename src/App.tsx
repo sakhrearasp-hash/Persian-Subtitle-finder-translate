@@ -74,18 +74,26 @@ const DEFAULT_SUBTITLES: SubtitleLine[] = [
 
 export default function App() {
   // Core State
-  const [provider, setProvider] = useState<TranslationProvider>("gemini");
-  const [geminiApiKey, setGeminiApiKey] = useState<string>(() => {
-    return localStorage.getItem("persian_sub_gemini_key") || localStorage.getItem("persian_sub_api_key") || "";
+  const [groqApiKey, setGroqApiKey] = useState<string>(() => {
+    return localStorage.getItem("persian_sub_groq_key") || localStorage.getItem("persian_sub_api_key") || "";
+  });
+  const [selectedModel, setSelectedModel] = useState<string>(() => {
+    return localStorage.getItem("persian_sub_model") || "llama-3.3-70b-versatile";
   });
 
-  const apiKey = geminiApiKey;
+  const apiKey = groqApiKey;
 
-  const changeGeminiKey = (val: string) => {
-    setGeminiApiKey(val);
-    localStorage.setItem("persian_sub_gemini_key", val);
+  const changeGroqKey = (val: string) => {
+    setGroqApiKey(val);
+    localStorage.setItem("persian_sub_groq_key", val);
     localStorage.setItem("persian_sub_api_key", val);
   };
+
+  const changeModel = (val: string) => {
+    setSelectedModel(val);
+    localStorage.setItem("persian_sub_model", val);
+  };
+
   const [movieName, setMovieName] = useState<string>("");
   const [searchResults, setSearchResults] = useState<SubtitleSearchResult[]>([]);
   const [selectedResultId, setSelectedResultId] = useState<string | null>(null);
@@ -113,7 +121,7 @@ export default function App() {
   
   // Collapsible settings & validation state
   const [isApiConfigOpen, setIsApiConfigOpen] = useState<boolean>(() => {
-    return !localStorage.getItem("persian_sub_api_key");
+    return !localStorage.getItem("persian_sub_api_key") && !localStorage.getItem("persian_sub_groq_key");
   });
   const [isValidatingKey, setIsValidatingKey] = useState<boolean>(false);
 
@@ -219,7 +227,7 @@ export default function App() {
       const response = await fetch("/api/search-subtitles", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ movieName, customKey: apiKey }),
+        body: JSON.stringify({ movieName, customKey: apiKey, model: selectedModel }),
       });
 
       if (!response.ok) {
@@ -275,6 +283,7 @@ export default function App() {
           body: JSON.stringify({
             subtitles: chunk,
             customKey: apiKey,
+            model: selectedModel,
             contextMode: contextAwareMode,
             localizationMode: naturalLocalization,
           }),
@@ -363,8 +372,8 @@ export default function App() {
 
   // Validate API key with the Express server
   const validateApiKey = async () => {
-    if (!geminiApiKey) {
-      setError("لطفاً ابتدا کلید API جمینای خود را وارد کنید.");
+    if (!groqApiKey) {
+      setError("لطفاً ابتدا کلید API خود را وارد کنید.");
       return;
     }
     setIsValidatingKey(true);
@@ -374,13 +383,13 @@ export default function App() {
       const res = await fetch("/api/validate-key", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ customKey: geminiApiKey }),
+        body: JSON.stringify({ customKey: groqApiKey }),
       });
       const data = await res.json();
       if (res.ok && data.success) {
-        setSuccess("سنجش موفقیت‌آمیز بود! کلید API جمینای تایید و فعال شد.");
-        localStorage.setItem("persian_sub_gemini_key", geminiApiKey);
-        localStorage.setItem("persian_sub_api_key", geminiApiKey);
+        setSuccess("سنجش موفقیت‌آمیز بود! کلید API با موفقیت تایید و فعال شد.");
+        localStorage.setItem("persian_sub_groq_key", groqApiKey);
+        localStorage.setItem("persian_sub_api_key", groqApiKey);
         setIsApiConfigOpen(false);
       } else {
         setError(data.error || "کلید وارد شده نامعتبر است یا کار نمی‌کند.");
@@ -508,7 +517,7 @@ export default function App() {
                 <h2 className="text-sm font-bold text-white flex items-center gap-2">
                   <Cpu className="w-4 h-4 text-purple-400" />
                   <span>تنظیمات هوش مصنوعی</span>
-                  {!isApiConfigOpen && geminiApiKey && (
+                  {!isApiConfigOpen && groqApiKey && (
                     <span className="text-[9px] bg-emerald-500/15 text-emerald-400 border border-emerald-500/20 px-2 py-0.5 rounded-full flex items-center gap-1 font-bold animate-pulse">
                       <span className="w-1.5 h-1.5 rounded-full bg-emerald-400" />
                       آماده
@@ -516,19 +525,19 @@ export default function App() {
                   )}
                 </h2>
                 <div className="flex items-center gap-1.5">
-                  <span className="text-xs text-slate-400 font-mono">Gemini-1.5-Flash</span>
+                  <span className="text-xs text-slate-400 font-mono">{selectedModel}</span>
                   <span className="text-xs text-slate-500 transition-transform duration-250">{isApiConfigOpen ? "▲" : "▼"}</span>
                 </div>
               </div>
 
               {isApiConfigOpen ? (
                 <div className="flex flex-col gap-4 mt-4">
-                  {/* Google Gemini Card */}
+                  {/* Groq Card */}
                   <div className="p-4 rounded-xl border bg-purple-950/20 border-purple-500/50 shadow-lg shadow-purple-500/5">
                     <div className="flex items-center justify-between mb-3">
                       <div className="flex items-center gap-2">
                         <span className="w-2.5 h-2.5 rounded-full bg-purple-400 animate-pulse" />
-                        <span className="text-xs font-bold text-white">موتور Google Gemini (مدل gemini-1.5-flash)</span>
+                        <span className="text-xs font-bold text-white">موتور Groq (تسهیل‌کننده ترجمه فوق‌سریع)</span>
                       </div>
                       <span className="text-[10px] bg-purple-500/20 text-purple-300 px-2 py-0.5 rounded-full font-bold">فعال</span>
                     </div>
@@ -536,14 +545,29 @@ export default function App() {
                     <div className="relative mb-2.5">
                       <input 
                         type="password" 
-                        placeholder="کلید API جمینای خود را وارد کنید..."
-                        value={geminiApiKey}
-                        onChange={(e) => changeGeminiKey(e.target.value)}
+                        placeholder="کلید API گرک (Groq API Key) را وارد کنید..."
+                        value={groqApiKey}
+                        onChange={(e) => changeGroqKey(e.target.value)}
                         className="w-full bg-black/40 border border-white/10 rounded-xl px-3 py-2 text-xs text-white placeholder-slate-500 focus:border-purple-500 outline-none transition-all"
                       />
-                      {geminiApiKey && (
+                      {groqApiKey && (
                         <Check className="w-3.5 h-3.5 text-emerald-400 absolute left-3 top-2.5" />
                       )}
+                    </div>
+
+                    {/* Model Selector */}
+                    <div className="mb-3">
+                      <label className="block text-[10px] font-semibold text-slate-400 mb-1.5">انتخاب مدل هوش مصنوعی Groq:</label>
+                      <select 
+                        value={selectedModel}
+                        onChange={(e) => changeModel(e.target.value)}
+                        className="w-full bg-black/60 border border-white/10 text-xs text-white rounded-xl px-2.5 py-1.5 outline-none focus:border-purple-500"
+                      >
+                        <option value="llama-3.3-70b-versatile">llama-3.3-70b-versatile (قوی‌ترین - پیشنهادی)</option>
+                        <option value="llama-3.1-70b-versatile">llama-3.1-70b-versatile (پایدار و دقیق)</option>
+                        <option value="llama-3.1-8b-instant">llama-3.1-8b-instant (بسیار سریع و اقتصادی)</option>
+                        <option value="mixtral-8x7b">mixtral-8x7b (مدل ترکیبی قدرتمند)</option>
+                      </select>
                     </div>
                     
                     <button
@@ -557,7 +581,7 @@ export default function App() {
                       ) : (
                         <CheckCircle2 className="w-3.5 h-3.5" />
                       )}
-                      <span>سنجش صحت کلید Gemini</span>
+                      <span>سنجش صحت کلید Groq</span>
                     </button>
                   </div>
                 </div>
@@ -970,7 +994,7 @@ export default function App() {
         <footer className="mt-12 text-center text-slate-500 text-xs leading-relaxed max-w-2xl mx-auto border-t border-white/5 pt-6 flex flex-col gap-1.5">
           <p className="font-bold text-slate-400">راهنما و ویژگی‌های کلیدی زیرنویس‌یاب هوشمند فارسی</p>
           <p>امکان جستجوی خودکار زیرنویس‌ها بر اساس نام فیلم، بارگذاری با درگ اند دراپ، ویرایش خط به خط ترجمه با رابط بومی‌سازی شده‌ی جذاب و روان فارسی در این MVP گنجانده شده است.</p>
-          <p className="font-mono text-slate-600 mt-2">© 2026 Persian Subtitle Finder system. Powered by Gemini Pro.</p>
+          <p className="font-mono text-slate-600 mt-2">© 2026 Persian Subtitle Finder system (Groq Edition). Powered by Groq AI Models.</p>
         </footer>
 
       </div>
