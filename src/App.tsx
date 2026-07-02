@@ -82,7 +82,7 @@ export default function App() {
   const [searchResults, setSearchResults] = useState<SubtitleSearchResult[]>([]);
   const [selectedResultId, setSelectedResultId] = useState<string | null>(null);
   
-  const [subtitles, setSubtitles] = useState<SubtitleLine[]>(DEFAULT_SUBTITLES);
+  const [subtitles, setSubtitles] = useState<SubtitleLine[]>([]);
   const [activeIndex, setActiveIndex] = useState<number | null>(null);
   const [filterQuery, setFilterQuery] = useState<string>("");
   
@@ -102,7 +102,12 @@ export default function App() {
   
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
-  const [showJsonView, setShowJsonView] = useState<boolean>(false);
+  
+  // Collapsible settings & validation state
+  const [isApiConfigOpen, setIsApiConfigOpen] = useState<boolean>(() => {
+    return !localStorage.getItem("persian_sub_api_key");
+  });
+  const [isValidatingKey, setIsValidatingKey] = useState<boolean>(false);
 
   // Drag & drop state
   const [isDragging, setIsDragging] = useState<boolean>(false);
@@ -348,12 +353,49 @@ export default function App() {
     return originalMatch || translatedMatch;
   });
 
+  // Validate API key with the Express server
+  const validateApiKey = async () => {
+    if (!apiKey) {
+      setError("لطفاً ابتدا کلید API خود را وارد کنید.");
+      return;
+    }
+    setIsValidatingKey(true);
+    setError(null);
+    setSuccess(null);
+    try {
+      const res = await fetch("/api/validate-key", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ customKey: apiKey }),
+      });
+      const data = await res.json();
+      if (res.ok && data.success) {
+        setSuccess("سنجش موفقیت‌آمیز بود! کلید API تایید و تنظیمات ذخیره شد.");
+        setIsApiConfigOpen(false);
+      } else {
+        setError(data.error || "کلید وارد شده نامعتبر است یا کار نمی‌کند.");
+      }
+    } catch (err: any) {
+      setError("خطا در برقراری ارتباط با سرور برای سنجش کلید.");
+    } finally {
+      setIsValidatingKey(false);
+    }
+  };
+
+  // Clear/End Subtitle Search
+  const handleClearSearch = () => {
+    setMovieName("");
+    setSearchResults([]);
+    setSelectedResultId(null);
+    setError(null);
+  };
+
   // Reset function to clear cache except for API Key
   const handleResetCache = () => {
     setMovieName("");
     setSearchResults([]);
     setSelectedResultId(null);
-    setSubtitles(DEFAULT_SUBTITLES.map(s => ({ ...s, translatedText: "" })));
+    setSubtitles([]);
     setActiveIndex(null);
     setFilterQuery("");
     setPastedText("");
@@ -448,70 +490,112 @@ export default function App() {
             <section id="api-config" className="bg-[#12182b]/60 backdrop-blur-xl border border-white/10 rounded-2xl p-5 shadow-xl relative overflow-hidden group">
               <div className="absolute top-0 right-0 w-32 h-32 bg-purple-600/5 rounded-full blur-2xl group-hover:bg-purple-600/10 transition-all pointer-events-none" />
               
-              <div className="flex items-center justify-between mb-4 border-b border-white/5 pb-3">
+              <div 
+                className="flex items-center justify-between mb-2 pb-3 border-b border-white/5 cursor-pointer"
+                onClick={() => setIsApiConfigOpen(!isApiConfigOpen)}
+                title="کلیک کنید تا کادر تنظیمات جمع یا باز شود"
+              >
                 <h2 className="text-sm font-bold text-white flex items-center gap-2">
                   <Cpu className="w-4 h-4 text-purple-400" />
                   <span>تنظیمات هوش مصنوعی</span>
+                  {!isApiConfigOpen && apiKey && (
+                    <span className="text-[9px] bg-emerald-500/15 text-emerald-400 border border-emerald-500/20 px-2 py-0.5 rounded-full flex items-center gap-1 font-bold animate-pulse">
+                      <span className="w-1.5 h-1.5 rounded-full bg-emerald-400" />
+                      آماده
+                    </span>
+                  )}
                 </h2>
-                <span className="text-xs text-slate-400 font-mono">API Setup</span>
-              </div>
-
-              <div className="flex flex-col gap-4">
-                {/* Provider Selector */}
-                <div>
-                  <label className="block text-xs font-semibold text-slate-400 mb-2">ارائه‌دهنده سرویس هوش مصنوعی</label>
-                  <div className="grid grid-cols-3 gap-2 p-1 bg-black/40 rounded-xl border border-white/5">
-                    <button 
-                      type="button"
-                      onClick={() => setProvider("gemini")}
-                      className={`py-1.5 px-3 text-xs font-semibold rounded-lg transition-all ${provider === "gemini" ? "bg-purple-600 text-white shadow-md shadow-purple-600/25" : "text-slate-400 hover:text-white"}`}
-                    >
-                      Gemini
-                    </button>
-                    <button 
-                      type="button"
-                      onClick={() => setProvider("openai")}
-                      className={`py-1.5 px-3 text-xs font-semibold rounded-lg transition-all ${provider === "openai" ? "bg-purple-600 text-white shadow-md shadow-purple-600/25" : "text-slate-400 hover:text-white"}`}
-                    >
-                      OpenAI (آزمایشی)
-                    </button>
-                    <button 
-                      type="button"
-                      onClick={() => setProvider("ollama")}
-                      className={`py-1.5 px-3 text-xs font-semibold rounded-lg transition-all ${provider === "ollama" ? "bg-purple-600 text-white shadow-md shadow-purple-600/25" : "text-slate-400 hover:text-white"}`}
-                    >
-                      Ollama (آفلاین)
-                    </button>
-                  </div>
-                </div>
-
-                {/* API Key Input */}
-                <div>
-                  <label className="block text-xs font-semibold text-slate-400 mb-2">
-                    کلید API هوش مصنوعی {provider === "gemini" ? "(سازگار با جمینای)" : ""}
-                  </label>
-                  <div className="relative">
-                    <input 
-                      type="password" 
-                      placeholder={provider === "ollama" ? "بدون نیاز به کلید برای Ollama محلی" : "کلید اختصاصی خود را وارد کنید..."}
-                      disabled={provider === "ollama"}
-                      value={provider === "ollama" ? "http://localhost:11434" : apiKey}
-                      onChange={(e) => setApiKey(e.target.value)}
-                      className="w-full bg-black/30 border border-white/10 rounded-xl px-3 py-2.5 text-xs text-white placeholder-slate-500 focus:border-purple-500 focus:ring-1 focus:ring-purple-500 outline-none transition-all"
-                    />
-                    {provider !== "ollama" && apiKey && (
-                      <Check className="w-4 h-4 text-emerald-400 absolute left-3 top-3" />
-                    )}
-                  </div>
-                  <p className="text-[10px] text-slate-500 mt-1.5 leading-relaxed">
-                    {provider === "gemini" 
-                      ? "در صورت خالی بودن کلید، سیستم از کلید سرور (در صورت وجود در فایل env.) استفاده خواهد کرد."
-                      : provider === "ollama"
-                      ? "سیستم به سرور Ollama محلی روی پورت ۱۱۴۳۴ متصل می‌شود. مطمئن شوید مدل در حال اجراست."
-                      : "برای استفاده از OpenAI وارد کردن کلید API الزامی است."}
-                  </p>
+                <div className="flex items-center gap-1.5">
+                  <span className="text-xs text-slate-400 font-mono">API Setup</span>
+                  <span className="text-xs text-slate-500 transition-transform duration-250">{isApiConfigOpen ? "▲" : "▼"}</span>
                 </div>
               </div>
+
+              {isApiConfigOpen ? (
+                <div className="flex flex-col gap-4 mt-4">
+                  {/* Provider Selector */}
+                  <div>
+                    <label className="block text-xs font-semibold text-slate-400 mb-2">ارائه‌دهنده سرویس هوش مصنوعی</label>
+                    <div className="grid grid-cols-3 gap-2 p-1 bg-black/40 rounded-xl border border-white/5">
+                      <button 
+                        type="button"
+                        onClick={() => setProvider("gemini")}
+                        className={`py-1.5 px-3 text-xs font-semibold rounded-lg transition-all ${provider === "gemini" ? "bg-purple-600 text-white shadow-md shadow-purple-600/25" : "text-slate-400 hover:text-white"}`}
+                      >
+                        Gemini
+                      </button>
+                      <button 
+                        type="button"
+                        onClick={() => setProvider("openai")}
+                        className={`py-1.5 px-3 text-xs font-semibold rounded-lg transition-all ${provider === "openai" ? "bg-purple-600 text-white shadow-md shadow-purple-600/25" : "text-slate-400 hover:text-white"}`}
+                      >
+                        OpenAI (آزمایشی)
+                      </button>
+                      <button 
+                        type="button"
+                        onClick={() => setProvider("ollama")}
+                        className={`py-1.5 px-3 text-xs font-semibold rounded-lg transition-all ${provider === "ollama" ? "bg-purple-600 text-white shadow-md shadow-purple-600/25" : "text-slate-400 hover:text-white"}`}
+                      >
+                        Ollama (آفلاین)
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* API Key Input */}
+                  <div>
+                    <label className="block text-xs font-semibold text-slate-400 mb-2">
+                      کلید API هوش مصنوعی {provider === "gemini" ? "(سازگار با جمینای)" : ""}
+                    </label>
+                    <div className="relative">
+                      <input 
+                        type="password" 
+                        placeholder={provider === "ollama" ? "بدون نیاز به کلید برای Ollama محلی" : "کلید اختصاصی خود را وارد کنید..."}
+                        disabled={provider === "ollama"}
+                        value={provider === "ollama" ? "http://localhost:11434" : apiKey}
+                        onChange={(e) => setApiKey(e.target.value)}
+                        className="w-full bg-black/30 border border-white/10 rounded-xl px-3 py-2.5 text-xs text-white placeholder-slate-500 focus:border-purple-500 focus:ring-1 focus:ring-purple-500 outline-none transition-all"
+                      />
+                      {provider !== "ollama" && apiKey && (
+                        <Check className="w-4 h-4 text-emerald-400 absolute left-3 top-3" />
+                      )}
+                    </div>
+                    <p className="text-[10px] text-slate-500 mt-1.5 leading-relaxed">
+                      {provider === "gemini" 
+                        ? "در صورت خالی بودن کلید، سیستم از کلید سرور (در صورت وجود در فایل env.) استفاده خواهد کرد."
+                        : provider === "ollama"
+                        ? "سیستم به سرور Ollama محلی روی پورت ۱۱۴۳۴ متصل می‌شود. مطمئن شوید مدل در حال اجراست."
+                        : "برای استفاده از OpenAI وارد کردن کلید API الزامی است."}
+                    </p>
+                  </div>
+
+                  {/* Validate & Save Key Button */}
+                  {provider !== "ollama" && (
+                    <button
+                      type="button"
+                      onClick={validateApiKey}
+                      disabled={isValidatingKey || !apiKey}
+                      className="w-full mt-1 bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 disabled:from-slate-800 disabled:to-slate-800 disabled:text-slate-500 text-white font-bold py-2.5 px-4 rounded-xl flex items-center justify-center gap-2 transition-all shadow-md text-xs cursor-pointer active:scale-[0.98]"
+                    >
+                      {isValidatingKey ? (
+                        <RefreshCw className="w-4 h-4 animate-spin" />
+                      ) : (
+                        <CheckCircle2 className="w-4 h-4" />
+                      )}
+                      <span>سنجش صحت و ذخیره‌سازی کلید API</span>
+                    </button>
+                  )}
+                </div>
+              ) : (
+                <div className="text-center mt-2.5">
+                  <button 
+                    type="button"
+                    onClick={() => setIsApiConfigOpen(true)}
+                    className="text-[10px] text-purple-400 hover:text-purple-300 font-bold hover:underline transition-all"
+                  >
+                    برای تغییر کلید API یا تنظیمات کلیک کنید
+                  </button>
+                </div>
+              )}
             </section>
 
             {/* Panel 2: Subtitle Search Panel (MAIN FEATURE) */}
@@ -550,8 +634,19 @@ export default function App() {
                       ) : (
                         <Search className="w-4 h-4" />
                       )}
-                      <span>جستجوی زیرنویس</span>
+                      <span>جستجو</span>
                     </button>
+                    {(movieName || searchResults.length > 0) && (
+                      <button 
+                        type="button"
+                        onClick={handleClearSearch}
+                        className="bg-red-500/10 hover:bg-red-500/20 text-red-400 hover:text-red-300 border border-red-500/25 px-3 py-2.5 rounded-xl transition-all cursor-pointer font-bold active:scale-95 text-xs shrink-0 flex items-center gap-1"
+                        title="پاکسازی نتایج و پایان فرآیند جستجو"
+                      >
+                        <Trash2 className="w-3.5 h-3.5" />
+                        <span>پایان جستجو</span>
+                      </button>
+                    )}
                   </div>
                 </div>
               </form>
@@ -561,9 +656,9 @@ export default function App() {
                 <div className="mt-4 pt-4 border-t border-white/5 flex flex-col gap-2.5">
                   <div className="text-xs font-bold text-slate-300">نتایج زیرنویس یافت شده:</div>
                   <div className="flex flex-col gap-2 max-h-48 overflow-y-auto">
-                    {searchResults.map((res) => (
+                    {searchResults.map((res, idx) => (
                       <div 
-                        key={res.id}
+                        key={`res-${res.id}-${idx}`}
                         onClick={() => loadSearchResult(res)}
                         className={`p-3 rounded-xl border text-right transition-all cursor-pointer flex flex-col gap-1.5 ${selectedResultId === res.id ? "bg-purple-950/40 border-purple-500/80 shadow-md" : "bg-black/20 border-white/5 hover:border-purple-500/30"}`}
                       >
@@ -783,7 +878,7 @@ export default function App() {
                     const isActive = activeIndex === index;
                     return (
                       <div 
-                        key={sub.id}
+                        key={`sub-${sub.id}-${index}`}
                         id={`sub-card-${sub.id}`}
                         onClick={() => setActiveIndex(index)}
                         className={`p-4 rounded-xl border text-right transition-all duration-200 cursor-text relative overflow-hidden ${
@@ -888,34 +983,7 @@ export default function App() {
                   <Copy className="w-4 h-4" />
                   <span>کپی در کلیپ‌بورد</span>
                 </button>
-
-                <button 
-                  type="button"
-                  onClick={() => setShowJsonView(!showJsonView)}
-                  disabled={subtitles.length === 0}
-                  className="bg-black/30 hover:bg-black/50 border border-white/5 text-slate-300 text-xs font-bold py-3 px-4 rounded-xl flex items-center justify-center gap-1.5 transition-all cursor-pointer active:scale-95 font-mono"
-                >
-                  <FileJson className="w-4 h-4 text-purple-400" />
-                  <span>JSON Dev</span>
-                </button>
               </div>
-
-              {/* Developer JSON Inspector View */}
-              {showJsonView && (
-                <motion.div 
-                  initial={{ opacity: 0, height: 0 }}
-                  animate={{ opacity: 1, height: "auto" }}
-                  className="bg-black/40 border border-white/5 rounded-xl p-4 mt-2 overflow-x-auto text-left"
-                >
-                  <div className="flex justify-between items-center text-xs text-slate-400 mb-2 font-mono">
-                    <span>Developer JSON Preview (Persian Translation payload)</span>
-                    <span className="bg-purple-900/30 text-purple-400 px-2 py-0.5 rounded font-mono">JSON Data</span>
-                  </div>
-                  <pre className="text-[10px] text-purple-300 font-mono leading-relaxed max-h-48 overflow-y-auto">
-                    {JSON.stringify(subtitles, null, 2)}
-                  </pre>
-                </motion.div>
-              )}
             </section>
 
           </div>

@@ -34,6 +34,28 @@ app.get("/api/health", (req, res) => {
   res.json({ status: "ok", time: new Date().toISOString() });
 });
 
+// 1b. Validate API Key Endpoint
+app.post("/api/validate-key", async (req, res) => {
+  try {
+    const { customKey } = req.body;
+    const ai = getGeminiClient(customKey);
+    
+    // Perform a tiny test request to confirm key validity
+    await ai.models.generateContent({
+      model: "gemini-2.5-flash",
+      contents: "Respond with the word: ok",
+    });
+
+    res.json({ success: true, message: "کلید API معتبر است و با موفقیت متصل شد." });
+  } catch (error: any) {
+    console.error("Error validating API key:", error);
+    res.status(400).json({ 
+      success: false, 
+      error: error.message || "کلید وارد شده معتبر نمی‌باشد یا خطایی در اتصال رخ داده است." 
+    });
+  }
+});
+
 // 2. Search and retrieve matching subtitles using Gemini (for authentic dialogues!)
 app.post("/api/search-subtitles", async (req, res) => {
   try {
@@ -128,13 +150,17 @@ app.post("/api/translate-subtitles", async (req, res) => {
     // Formulate a prompt list
     const subtitleLinesPrompt = subtitles.map((s: any) => `Line ${s.id}: "${s.text}"`).join("\n");
     
-    const systemInstruction = `You are an elite cinematic translator translating film subtitles into Persian (Iranian Farsi - فارسی روان ایرانی).
-Guidelines:
-1. Translate contextually, not literally. Match the emotional tone, colloquial speech, idioms, and natural rhythm of Farsi.
-2. Use professional subtitle guidelines (concise but full of emotional impact).
-3. If "localization" is requested (default: ON), make names, jokes, or idioms sound natural and easily understood to an Iranian audience.
-4. Maintain exact line numbering (id) so they match the input perfectly.
-5. Return the response STRICTLY as a JSON array of objects with keys 'id' (integer) and 'translatedText' (string). Do not add any markdown blocks or explanations outside the JSON array.
+    const systemInstruction = `You are a professional cinematic subtitle translator and localization engine.
+You will translate movie subtitles into natural Iranian Persian (Farsi - فارسی روان ایرانی).
+
+CRITICAL RULES:
+1. DO NOT translate line-by-line in isolation.
+2. ALWAYS group every 2 to 3 consecutive subtitle lines together as one unified semantic unit/chunk, translate them together to capture the full context, and then split the resulting translation back into the individual original line IDs.
+3. Preserve subtitle TIMING and sync EXACTLY (do not merge, delete, or re-order lines).
+4. Translate in CONTEXT-AWARE mode (not literal translation). Understand dialogue as part of a scene, preserving emotional tone, sarcasm, humor, and tension.
+5. Maintain character voice consistency and keep names, places, and proper nouns consistent.
+6. The output must be natural Iranian spoken Persian (not formal/book language) of movie-quality localization (like professional Netflix dubbing subtitles).
+7. Return the response STRICTLY as a JSON array of objects with keys 'id' (integer matching the input) and 'translatedText' (string). Do not include any explanations or markdown outside the JSON structure.
 
 Response JSON Schema structure:
 [
@@ -143,7 +169,7 @@ Response JSON Schema structure:
 
     const response = await ai.models.generateContent({
       model: "gemini-3.5-flash",
-      contents: `Translate these subtitle lines into high-quality, natural Iranian Persian:\n\n${subtitleLinesPrompt}`,
+      contents: `Translate the following consecutive subtitle lines using the 2-3 line semantic chunking strategy:\n\n${subtitleLinesPrompt}`,
       config: {
         systemInstruction,
         responseMimeType: "application/json",
