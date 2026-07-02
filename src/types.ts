@@ -15,4 +15,4 @@ export interface SubtitleSearchResult {
   lines: SubtitleLine[];
 }
 
-export type TranslationProvider = "gemini" | "openai" | "ollama";
+export type TranslationProvider = "gemini";

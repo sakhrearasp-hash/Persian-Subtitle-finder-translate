@@ -74,10 +74,18 @@ const DEFAULT_SUBTITLES: SubtitleLine[] = [
 
 export default function App() {
   // Core State
-  const [apiKey, setApiKey] = useState<string>(() => {
-    return localStorage.getItem("persian_sub_api_key") || "";
-  });
   const [provider, setProvider] = useState<TranslationProvider>("gemini");
+  const [geminiApiKey, setGeminiApiKey] = useState<string>(() => {
+    return localStorage.getItem("persian_sub_gemini_key") || localStorage.getItem("persian_sub_api_key") || "";
+  });
+
+  const apiKey = geminiApiKey;
+
+  const changeGeminiKey = (val: string) => {
+    setGeminiApiKey(val);
+    localStorage.setItem("persian_sub_gemini_key", val);
+    localStorage.setItem("persian_sub_api_key", val);
+  };
   const [movieName, setMovieName] = useState<string>("");
   const [searchResults, setSearchResults] = useState<SubtitleSearchResult[]>([]);
   const [selectedResultId, setSelectedResultId] = useState<string | null>(null);
@@ -355,8 +363,8 @@ export default function App() {
 
   // Validate API key with the Express server
   const validateApiKey = async () => {
-    if (!apiKey) {
-      setError("لطفاً ابتدا کلید API خود را وارد کنید.");
+    if (!geminiApiKey) {
+      setError("لطفاً ابتدا کلید API جمینای خود را وارد کنید.");
       return;
     }
     setIsValidatingKey(true);
@@ -366,11 +374,13 @@ export default function App() {
       const res = await fetch("/api/validate-key", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ customKey: apiKey }),
+        body: JSON.stringify({ customKey: geminiApiKey }),
       });
       const data = await res.json();
       if (res.ok && data.success) {
-        setSuccess("سنجش موفقیت‌آمیز بود! کلید API تایید و تنظیمات ذخیره شد.");
+        setSuccess("سنجش موفقیت‌آمیز بود! کلید API جمینای تایید و فعال شد.");
+        localStorage.setItem("persian_sub_gemini_key", geminiApiKey);
+        localStorage.setItem("persian_sub_api_key", geminiApiKey);
         setIsApiConfigOpen(false);
       } else {
         setError(data.error || "کلید وارد شده نامعتبر است یا کار نمی‌کند.");
@@ -498,7 +508,7 @@ export default function App() {
                 <h2 className="text-sm font-bold text-white flex items-center gap-2">
                   <Cpu className="w-4 h-4 text-purple-400" />
                   <span>تنظیمات هوش مصنوعی</span>
-                  {!isApiConfigOpen && apiKey && (
+                  {!isApiConfigOpen && geminiApiKey && (
                     <span className="text-[9px] bg-emerald-500/15 text-emerald-400 border border-emerald-500/20 px-2 py-0.5 rounded-full flex items-center gap-1 font-bold animate-pulse">
                       <span className="w-1.5 h-1.5 rounded-full bg-emerald-400" />
                       آماده
@@ -506,84 +516,50 @@ export default function App() {
                   )}
                 </h2>
                 <div className="flex items-center gap-1.5">
-                  <span className="text-xs text-slate-400 font-mono">API Setup</span>
+                  <span className="text-xs text-slate-400 font-mono">Gemini-1.5-Flash</span>
                   <span className="text-xs text-slate-500 transition-transform duration-250">{isApiConfigOpen ? "▲" : "▼"}</span>
                 </div>
               </div>
 
               {isApiConfigOpen ? (
                 <div className="flex flex-col gap-4 mt-4">
-                  {/* Provider Selector */}
-                  <div>
-                    <label className="block text-xs font-semibold text-slate-400 mb-2">ارائه‌دهنده سرویس هوش مصنوعی</label>
-                    <div className="grid grid-cols-3 gap-2 p-1 bg-black/40 rounded-xl border border-white/5">
-                      <button 
-                        type="button"
-                        onClick={() => setProvider("gemini")}
-                        className={`py-1.5 px-3 text-xs font-semibold rounded-lg transition-all ${provider === "gemini" ? "bg-purple-600 text-white shadow-md shadow-purple-600/25" : "text-slate-400 hover:text-white"}`}
-                      >
-                        Gemini
-                      </button>
-                      <button 
-                        type="button"
-                        onClick={() => setProvider("openai")}
-                        className={`py-1.5 px-3 text-xs font-semibold rounded-lg transition-all ${provider === "openai" ? "bg-purple-600 text-white shadow-md shadow-purple-600/25" : "text-slate-400 hover:text-white"}`}
-                      >
-                        OpenAI (آزمایشی)
-                      </button>
-                      <button 
-                        type="button"
-                        onClick={() => setProvider("ollama")}
-                        className={`py-1.5 px-3 text-xs font-semibold rounded-lg transition-all ${provider === "ollama" ? "bg-purple-600 text-white shadow-md shadow-purple-600/25" : "text-slate-400 hover:text-white"}`}
-                      >
-                        Ollama (آفلاین)
-                      </button>
+                  {/* Google Gemini Card */}
+                  <div className="p-4 rounded-xl border bg-purple-950/20 border-purple-500/50 shadow-lg shadow-purple-500/5">
+                    <div className="flex items-center justify-between mb-3">
+                      <div className="flex items-center gap-2">
+                        <span className="w-2.5 h-2.5 rounded-full bg-purple-400 animate-pulse" />
+                        <span className="text-xs font-bold text-white">موتور Google Gemini (مدل gemini-1.5-flash)</span>
+                      </div>
+                      <span className="text-[10px] bg-purple-500/20 text-purple-300 px-2 py-0.5 rounded-full font-bold">فعال</span>
                     </div>
-                  </div>
-
-                  {/* API Key Input */}
-                  <div>
-                    <label className="block text-xs font-semibold text-slate-400 mb-2">
-                      کلید API هوش مصنوعی {provider === "gemini" ? "(سازگار با جمینای)" : ""}
-                    </label>
-                    <div className="relative">
+                    
+                    <div className="relative mb-2.5">
                       <input 
                         type="password" 
-                        placeholder={provider === "ollama" ? "بدون نیاز به کلید برای Ollama محلی" : "کلید اختصاصی خود را وارد کنید..."}
-                        disabled={provider === "ollama"}
-                        value={provider === "ollama" ? "http://localhost:11434" : apiKey}
-                        onChange={(e) => setApiKey(e.target.value)}
-                        className="w-full bg-black/30 border border-white/10 rounded-xl px-3 py-2.5 text-xs text-white placeholder-slate-500 focus:border-purple-500 focus:ring-1 focus:ring-purple-500 outline-none transition-all"
+                        placeholder="کلید API جمینای خود را وارد کنید..."
+                        value={geminiApiKey}
+                        onChange={(e) => changeGeminiKey(e.target.value)}
+                        className="w-full bg-black/40 border border-white/10 rounded-xl px-3 py-2 text-xs text-white placeholder-slate-500 focus:border-purple-500 outline-none transition-all"
                       />
-                      {provider !== "ollama" && apiKey && (
-                        <Check className="w-4 h-4 text-emerald-400 absolute left-3 top-3" />
+                      {geminiApiKey && (
+                        <Check className="w-3.5 h-3.5 text-emerald-400 absolute left-3 top-2.5" />
                       )}
                     </div>
-                    <p className="text-[10px] text-slate-500 mt-1.5 leading-relaxed">
-                      {provider === "gemini" 
-                        ? "در صورت خالی بودن کلید، سیستم از کلید سرور (در صورت وجود در فایل env.) استفاده خواهد کرد."
-                        : provider === "ollama"
-                        ? "سیستم به سرور Ollama محلی روی پورت ۱۱۴۳۴ متصل می‌شود. مطمئن شوید مدل در حال اجراست."
-                        : "برای استفاده از OpenAI وارد کردن کلید API الزامی است."}
-                    </p>
-                  </div>
-
-                  {/* Validate & Save Key Button */}
-                  {provider !== "ollama" && (
+                    
                     <button
                       type="button"
                       onClick={validateApiKey}
-                      disabled={isValidatingKey || !apiKey}
-                      className="w-full mt-1 bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 disabled:from-slate-800 disabled:to-slate-800 disabled:text-slate-500 text-white font-bold py-2.5 px-4 rounded-xl flex items-center justify-center gap-2 transition-all shadow-md text-xs cursor-pointer active:scale-[0.98]"
+                      disabled={isValidatingKey}
+                      className="w-full bg-purple-600/20 hover:bg-purple-600/30 text-purple-300 hover:text-purple-200 border border-purple-500/30 font-bold py-1.5 px-3 rounded-lg flex items-center justify-center gap-1.5 transition-all text-[11px] cursor-pointer active:scale-[0.98]"
                     >
                       {isValidatingKey ? (
-                        <RefreshCw className="w-4 h-4 animate-spin" />
+                        <RefreshCw className="w-3 h-3 animate-spin" />
                       ) : (
-                        <CheckCircle2 className="w-4 h-4" />
+                        <CheckCircle2 className="w-3.5 h-3.5" />
                       )}
-                      <span>سنجش صحت و ذخیره‌سازی کلید API</span>
+                      <span>سنجش صحت کلید Gemini</span>
                     </button>
-                  )}
+                  </div>
                 </div>
               ) : (
                 <div className="text-center mt-2.5">

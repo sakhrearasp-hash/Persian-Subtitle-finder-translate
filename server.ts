@@ -42,14 +42,14 @@ app.post("/api/validate-key", async (req, res) => {
     
     // Perform a tiny test request to confirm key validity
     await ai.models.generateContent({
-      model: "gemini-2.5-flash",
+      model: "gemini-1.5-flash",
       contents: "Respond with the word: ok",
     });
 
-    res.json({ success: true, message: "کلید API معتبر است و با موفقیت متصل شد." });
+    return res.json({ success: true, message: "کلید Gemini معتبر است و با موفقیت متصل شد." });
   } catch (error: any) {
     console.error("Error validating API key:", error);
-    res.status(400).json({ 
+    return res.status(400).json({ 
       success: false, 
       error: error.message || "کلید وارد شده معتبر نمی‌باشد یا خطایی در اتصال رخ داده است." 
     });
@@ -77,7 +77,7 @@ app.post("/api/search-subtitles", async (req, res) => {
     - text (string, the original dialogue text)`;
 
     const response = await ai.models.generateContent({
-      model: "gemini-3.5-flash",
+      model: "gemini-1.5-flash",
       contents: prompt,
       config: {
         systemInstruction: "You are an expert film database and subtitle collector. Generate realistic, contextually connected lines of subtitles for any specified film in its original language.",
@@ -168,7 +168,7 @@ Response JSON Schema structure:
 ]`;
 
     const response = await ai.models.generateContent({
-      model: "gemini-3.5-flash",
+      model: "gemini-1.5-flash",
       contents: `Translate the following consecutive subtitle lines using the 2-3 line semantic chunking strategy:\n\n${subtitleLinesPrompt}`,
       config: {
         systemInstruction,
