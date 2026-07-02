@@ -80,7 +80,7 @@ app.post("/api/search-subtitles", async (req, res) => {
     const apiKey = getGroqApiKey(customKey);
     const selectedModel = model || "llama-3.3-70b-versatile";
 
-    const prompt = `Generate 8 consecutive, iconic dialogue lines from the movie or video named "${movieName}".
+    const prompt = `Generate 35 consecutive, iconic dialogue lines from the movie or video named "${movieName}".
     Return them as a JSON object with a "lines" key containing an array of subtitle objects in the original language of the film.
     Each object inside the "lines" array must strictly have:
     - id (number, starting from 1)
@@ -137,8 +137,8 @@ app.post("/api/search-subtitles", async (req, res) => {
           fileName: `${movieName.replace(/[\s\W]+/g, ".")}.2024.HDRip.Alternative.srt`,
           language: "فرانسوی/دیگر (دوبله/اصلی)",
           languageCode: "fr",
-          linesCount: Math.min(5, parsedLines.length),
-          lines: parsedLines.slice(0, 5).map((l: any, idx: number) => ({
+          linesCount: Math.min(20, parsedLines.length),
+          lines: parsedLines.slice(0, 20).map((l: any, idx: number) => ({
             ...l,
             id: idx + 1,
             text: l.text + " (alt version)"

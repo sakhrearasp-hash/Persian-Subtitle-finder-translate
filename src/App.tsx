@@ -269,7 +269,7 @@ export default function App() {
     setError(null);
     setSuccess(null);
 
-    const batchSize = 10; // Batch translation to prevent rate limits and maintain context
+    const batchSize = 35; // Batch translation size optimized for faster and more unified context translations
     const totalLines = subtitles.length;
     let updatedSubtitles = [...subtitles];
 
@@ -342,6 +342,25 @@ export default function App() {
       setSuccess("فایل زیرنویس فارسی (SRT) با موفقیت دانلود شد.");
     } catch (err) {
       setError("خطا در ایجاد و دانلود فایل زیرنویس.");
+    }
+  };
+
+  // Export original language SRT
+  const handleDownloadOriginalSRT = () => {
+    try {
+      const srtString = stringifySRT(subtitles, false);
+      const blob = new Blob([srtString], { type: "text/plain;charset=utf-8" });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = `Original_${movieName ? movieName.replace(/\s+/g, "_") : "Subtitle"}.srt`;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      URL.revokeObjectURL(url);
+      setSuccess("فایل زیرنویس اصلی (SRT) با موفقیت دانلود شد.");
+    } catch (err) {
+      setError("خطا در ایجاد و دانلود فایل زیرنویس اصلی.");
     }
   };
 
@@ -972,6 +991,16 @@ export default function App() {
                 >
                   <Download className="w-4.5 h-4.5" />
                   <span>دانلود فایل نهایی SRT فارسی</span>
+                </button>
+
+                <button 
+                  type="button"
+                  onClick={handleDownloadOriginalSRT}
+                  disabled={subtitles.length === 0}
+                  className="bg-slate-800 hover:bg-slate-700 disabled:bg-slate-950 disabled:text-slate-600 border border-white/5 text-slate-200 font-bold py-3 px-4 rounded-xl flex items-center justify-center gap-2 transition-all active:scale-95 cursor-pointer text-xs"
+                >
+                  <Download className="w-4 h-4 text-purple-400" />
+                  <span>دانلود زیرنویس اصلی</span>
                 </button>
 
                 <button 
