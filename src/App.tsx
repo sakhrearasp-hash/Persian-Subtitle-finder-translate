@@ -73,6 +73,11 @@ const DEFAULT_SUBTITLES: SubtitleLine[] = [
 ];
 
 export default function App() {
+  const [availableModels, setAvailableModels] = useState<any[]>([]);
+
+  useEffect(() => {
+    validateOllamaConnection();
+  }, []);
   // Core State
   const [selectedModel, setSelectedModel] = useState<string>(() => {
     return localStorage.getItem("persian_sub_model") || "llama3.1";
@@ -459,6 +464,12 @@ export default function App() {
       });
       const data = await res.json();
       if (res.ok && data.success) {
+        if (data.models) {
+           setAvailableModels(data.models);
+           if (data.models.length > 0 && !data.models.find((m: any) => m.name === selectedModel)) {
+             setSelectedModel(data.models[0].name);
+           }
+        }
         setSuccess("سنجش موفقیت‌آمیز بود! ارتباط با Ollama با موفقیت برقرار شد.");
         setIsApiConfigOpen(false);
       } else {
@@ -470,7 +481,6 @@ export default function App() {
       setIsValidatingKey(false);
     }
   };
-
   // Clear/End Subtitle Search
   const handleClearSearch = () => {
     setMovieName("");
@@ -620,18 +630,18 @@ export default function App() {
                      {/* Model Selector */}
                      <div className="mb-3">
                        <label className="block text-[10px] font-semibold text-slate-400 mb-1.5">انتخاب مدل هوش مصنوعی Ollama:</label>
-                       <select 
+                       <select
                          value={selectedModel}
                          onChange={(e) => changeModel(e.target.value)}
                          className="w-full bg-black/60 border border-teal-900/30 text-xs text-white rounded-3xl px-2.5 py-1.5 outline-none focus:border-teal-500"
                        >
-                         <option value="llama3.1">llama3.1 (پیشنهادی - دقیق و پایدار)</option>
-                         <option value="llama3.2">llama3.2 (جدیدترین مدل سبک)</option>
-                         <option value="llama3">llama3 (کلاسیک)</option>
-                         <option value="mistral">mistral (سریع و قدرتمند)</option>
-                         <option value="mixtral">mixtral (ترکیبی پیشرفته)</option>
-                         <option value="qwen2">qwen2 (چندزبانه حرفه‌ای)</option>
-                         <option value="gemma">gemma (مدل باز گوگل - Gamma)</option>
+                         {availableModels.length > 0 ? (
+                           availableModels.map((m: any) => (
+                             <option key={m.name} value={m.name}>{m.name}</option>
+                           ))
+                         ) : (
+                           <option value={selectedModel}>{selectedModel}</option>
+                         )}
                        </select>
                      </div>
                      
