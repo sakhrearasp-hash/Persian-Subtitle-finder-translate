@@ -422,10 +422,10 @@ export default function App() {
     <div className="min-h-screen relative overflow-x-hidden font-sans pb-16 bg-[#0a0f1d] selection:bg-purple-600 selection:text-white">
       {/* Cinematic Persepolis (Takht-e Jamshid) Background Overlay */}
       <div 
-        className="fixed inset-0 z-0 pointer-events-none opacity-15 mix-blend-screen bg-cover bg-center"
+        className="fixed inset-0 z-0 pointer-events-none opacity-20 mix-blend-overlay bg-cover bg-center blur-[3px]"
         style={{ backgroundImage: `url(${persepolisBg})` }}
       />
-      <div className="fixed inset-0 bg-gradient-to-t from-[#0a0f1d] via-[#0d1225]/90 to-[#070b16]/70 z-0 pointer-events-none" />
+      <div className="fixed inset-0 bg-gradient-to-t from-[#05080f] via-[#0a0f1d]/90 to-[#05080f]/90 z-0 pointer-events-none" />
 
       {/* Main Container */}
       <div className="relative z-10 max-w-7xl mx-auto px-4 pt-6 sm:pt-10">
@@ -651,8 +651,15 @@ export default function App() {
                           <span className="text-xs font-bold text-purple-200 line-clamp-1">{res.fileName}</span>
                           <span className="text-[10px] bg-purple-900/40 text-purple-300 px-2 py-0.5 rounded font-medium shrink-0">{res.language}</span>
                         </div>
-                        <div className="flex items-center justify-between text-[10px] text-slate-400">
-                          <span className="font-mono">تعداد خطوط: {res.linesCount}</span>
+                        <div className="flex items-center justify-between text-[10px] text-slate-400 mt-1">
+                          <div className="flex items-center gap-2">
+                            <span className="font-mono">تعداد خطوط: {res.linesCount}</span>
+                            {res.source && (
+                              <span className="bg-white/5 border border-white/10 px-1.5 py-0.5 rounded text-slate-300">
+                                منبع: {res.source}
+                              </span>
+                            )}
+                          </div>
                           <span className="text-purple-400 font-semibold flex items-center gap-0.5">
                             <Check className="w-3 h-3" /> انتخاب و بارگذاری
                           </span>

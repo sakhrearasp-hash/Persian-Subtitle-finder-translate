@@ -13,6 +13,7 @@ export interface SubtitleSearchResult {
   languageCode: string;
   linesCount: number;
   lines: SubtitleLine[];
+  source?: string;
 }
 
 export type TranslationProvider = "ollama";

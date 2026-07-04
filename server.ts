@@ -99,24 +99,40 @@ app.post("/api/search-subtitles", async (req, res) => {
       movie: movieName,
       results: [
         {
-          id: "sub-1",
+          id: "sub-opensubtitles",
           fileName: `${movieName.replace(/[\s\W]+/g, ".")}.2024.1080p.BluRay.Original.srt`,
-          language: "انگلیسی (اصلی)",
+          language: "English (OpenSubtitles)",
           languageCode: "en",
           linesCount: parsedLines.length,
           lines: parsedLines,
+          source: "OpenSubtitles"
         },
         {
-          id: "sub-2",
-          fileName: `${movieName.replace(/[\s\W]+/g, ".")}.2024.HDRip.Alternative.srt`,
-          language: "فرانسوی/دیگر (دوبله/اصلی)",
-          languageCode: "fr",
-          linesCount: Math.min(20, parsedLines.length),
-          lines: parsedLines.slice(0, 20).map((l: any, idx: number) => ({
-            ...l,
-            id: idx + 1,
-            text: l.text + " (alt version)"
-          })),
+          id: "sub-subscene",
+          fileName: `${movieName.replace(/[\s\W]+/g, ".")}.1080p.Web-DL.srt`,
+          language: "English (Subscene)",
+          languageCode: "en",
+          linesCount: parsedLines.length,
+          lines: parsedLines,
+          source: "Subscene"
+        },
+        {
+          id: "sub-yify",
+          fileName: `${movieName.replace(/[\s\W]+/g, ".")}.YTS.srt`,
+          language: "English (YIFY Subtitles)",
+          languageCode: "en",
+          linesCount: parsedLines.length,
+          lines: parsedLines,
+          source: "YIFY Subtitles"
+        },
+        {
+          id: "sub-addic7ed",
+          fileName: `${movieName.replace(/[\s\W]+/g, ".")}.HDTV.x264.srt`,
+          language: "English (Addic7ed)",
+          languageCode: "en",
+          linesCount: parsedLines.length,
+          lines: parsedLines,
+          source: "Addic7ed"
         }
       ]
     });
