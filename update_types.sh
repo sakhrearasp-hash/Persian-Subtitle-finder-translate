@@ -1,3 +1,5 @@
+#!/bin/bash
+cat << 'INNER_EOF' > src/types.ts
 export interface SubtitleLine {
   id: number;
   startTime: string;
@@ -19,3 +21,4 @@ export interface SubtitleSearchResult {
 }
 
 export type TranslationProvider = "ollama";
+INNER_EOF

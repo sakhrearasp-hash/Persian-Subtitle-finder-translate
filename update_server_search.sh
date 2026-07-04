@@ -1,3 +1,5 @@
+#!/bin/bash
+cat << 'INNER_EOF' > server.ts
 import express from "express";
 import path from "path";
 import { createServer as createViteServer } from "vite";
@@ -258,3 +260,4 @@ Response JSON Schema structure:
 }
 
 startServer();
+INNER_EOF

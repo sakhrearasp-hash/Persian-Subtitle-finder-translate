@@ -88,18 +88,13 @@ export default function App() {
     localStorage.setItem("persian_sub_model", val);
   };
 
-  const [selectedEngines, setSelectedEngines] = useState({
-    opensubtitles: true,
-    subscene: true,
-    yify: true,
-    addic7ed: true,
-    google: false
+  const [openSubtitlesApiKey, setOpenSubtitlesApiKey] = useState<string>(() => {
+    return localStorage.getItem("opensubtitles_api_key") || "";
   });
-
-  const toggleEngine = (engine: keyof typeof selectedEngines) => {
-    setSelectedEngines(prev => ({ ...prev, [engine]: !prev[engine] }));
+  const changeApiKey = (val: string) => {
+    setOpenSubtitlesApiKey(val);
+    localStorage.setItem("opensubtitles_api_key", val);
   };
-
   const [movieName, setMovieName] = useState<string>("");
   const [searchResults, setSearchResults] = useState<SubtitleSearchResult[]>([]);
   const [selectedResultId, setSelectedResultId] = useState<string | null>(null);
@@ -230,7 +225,7 @@ export default function App() {
       const response = await fetch("/api/search-subtitles", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ movieName, model: selectedModel, engines: selectedEngines }),
+        body: JSON.stringify({ movieName, apiKey: openSubtitlesApiKey }),
       });
 
       if (!response.ok) {
@@ -253,14 +248,39 @@ export default function App() {
   };
 
   // Load a subtitle version from search results
-  const loadSearchResult = (result: SubtitleSearchResult) => {
-    setSubtitles(result.lines);
-    setSelectedResultId(result.id);
-    setActiveIndex(null);
-    setSuccess(`زیرنویس نسخه "${result.fileName}" بارگذاری شد.`);
+  const loadSearchResult = async (result: SubtitleSearchResult) => {
+    if (!openSubtitlesApiKey) {
+       setError("کلید API وارد نشده است.");
+       return;
+    }
+    setIsSearching(true);
+    setError(null);
+    setSuccess(null);
+    try {
+      const response = await fetch("/api/download-subtitle", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ fileId: result.fileId, apiKey: openSubtitlesApiKey })
+      });
+      if (!response.ok) {
+        const errData = await response.json();
+        throw new Error(errData.error || "خطا در دانلود زیرنویس");
+      }
+      const data = await response.json();
+      if (data.success && data.fileContent) {
+        const parsed = parseSRT(data.fileContent);
+        setSubtitles(parsed);
+        setSelectedResultId(result.id);
+        setActiveIndex(null);
+        setSuccess(`زیرنویس نسخه "${result.fileName}" دانلود و بارگذاری شد.`);
+      }
+    } catch (err: any) {
+      setError(err.message || "خطا در دریافت فایل زیرنویس.");
+    } finally {
+      setIsSearching(false);
+    }
   };
 
-  // Translate with AI (Line-by-Line or Batch based translation logic)
   const handleTranslateWithAI = async () => {
     if (subtitles.length === 0) {
       setError("هیچ زیرنویسی برای ترجمه بارگذاری نشده است.");
@@ -272,7 +292,7 @@ export default function App() {
     setError(null);
     setSuccess(null);
 
-    const batchSize = 35; // Batch translation size optimized for faster and more unified context translations
+    const batchSize = 35;
     const totalLines = subtitles.length;
     let updatedSubtitles = [...subtitles];
 
@@ -280,50 +300,57 @@ export default function App() {
       for (let i = 0; i < totalLines; i += batchSize) {
         const chunk = subtitles.slice(i, i + batchSize);
         
-        const response = await fetch("/api/translate-subtitles", {
+        const subtitleLinesPrompt = chunk.map((s: any) => `Line ${s.id}: "${s.text}"`).join("\n");
+        const systemInstruction = `You are a professional cinematic subtitle translator and localization engine.\nYou will translate movie subtitles into natural Iranian Persian (Farsi - فارسی روان ایرانی).\n\nCRITICAL RULES:\n1. DO NOT translate line-by-line in isolation.\n2. ALWAYS group every 2 to 3 consecutive subtitle lines together as one unified semantic unit/chunk, translate them together to capture the full context, and then split the resulting translation back into the individual original line IDs.\n3. Preserve subtitle TIMING and sync EXACTLY (do not merge, delete, or re-order lines).\n4. Translate in CONTEXT-AWARE mode (not literal translation). Understand dialogue as part of a scene, preserving emotional tone, sarcasm, humor, and tension.\n5. Maintain character voice consistency and keep names, places, and proper nouns consistent.\n6. The output must be natural Iranian spoken Persian (not formal/book language) of movie-quality localization (like professional Netflix dubbing subtitles).\n7. Return the response STRICTLY as a JSON object with a \translations key containing an array of objects with keys \id (integer matching the input) and \translatedText (string). Do not include any explanations or markdown outside the JSON structure.\n\nResponse JSON Schema structure:\n{\n  "translations": [\n    { "id": 1, "translatedText": "متن ترجمه شده به فارسی روان" }\n  ]\n}`;
+
+        const response = await fetch("http://localhost:11434/api/chat", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
-            subtitles: chunk,
             model: selectedModel,
-            contextMode: contextAwareMode,
-            localizationMode: naturalLocalization,
+            messages: [
+              { role: "system", content: systemInstruction },
+              { role: "user", content: `Translate the following consecutive subtitle lines using the 2-3 line semantic chunking strategy:\n\n${subtitleLinesPrompt}` }
+            ],
+            stream: false,
+            format: "json"
           }),
         });
 
         if (!response.ok) {
-          const errData = await response.json();
-          throw new Error(errData.error || "خطا در ترجمه دسته اول زیرنویس‌ها.");
+          throw new Error("خطا در ترجمه دسته اول زیرنویس‌ها با Ollama.");
         }
 
         const data = await response.json();
-        if (data.success && data.translatedSubtitles) {
-          // Merge translated block
-          data.translatedSubtitles.forEach((translatedItem: SubtitleLine) => {
+        const content = data.message?.content || "{}";
+        let parsedData: any = {};
+        try {
+          const jsonMatch = content.match(/\{[\s\S]*\}/);
+          parsedData = jsonMatch ? JSON.parse(jsonMatch[0]) : JSON.parse(content);
+        } catch (e) { console.error("Parse Error"); }
+
+        const translatedResults = parsedData.translations || [];
+        if (translatedResults.length > 0) {
+          translatedResults.forEach((translatedItem: any) => {
             const index = updatedSubtitles.findIndex(item => item.id === translatedItem.id);
             if (index !== -1) {
-              updatedSubtitles[index] = {
-                ...updatedSubtitles[index],
-                translatedText: translatedItem.translatedText,
-              };
+              updatedSubtitles[index] = { ...updatedSubtitles[index], translatedText: translatedItem.translatedText };
             }
           });
-
-          // Iterative updates for a smooth live editing presentation
-          setSubtitles([...updatedSubtitles]);
-          setTranslationProgress(Math.min(100, Math.round(((i + chunk.length) / totalLines) * 100)));
         }
-      }
 
-      setSuccess("ترجمه کل زیرنویس به فارسی روان با موفقیت به پایان رسید!");
+        setSubtitles([...updatedSubtitles]);
+        setTranslationProgress(Math.min(100, Math.round(((i + batchSize) / totalLines) * 100)));
+      }
+      setSuccess("فرآیند ترجمه هوشمند در تمام خطوط با موفقیت به پایان رسید.");
     } catch (err: any) {
-      setError(err.message || "خطایی در فرآیند ترجمه رخ داد.");
+      setError(err.message || "خطا در ترجمه.");
     } finally {
       setIsTranslating(false);
+      setTranslationProgress(100);
     }
   };
 
-  // Autocorrect with AI (Batch based logic)
   const handleAutocorrectWithAI = async () => {
     if (subtitles.length === 0) {
       setError("هیچ زیرنویسی برای اصلاح بارگذاری نشده است.");
@@ -335,7 +362,7 @@ export default function App() {
     setError(null);
     setSuccess(null);
 
-    const batchSize = 35; // Batch size optimized for faster context corrections
+    const batchSize = 35;
     const totalLines = subtitles.length;
     let updatedSubtitles = [...subtitles];
 
@@ -343,44 +370,54 @@ export default function App() {
       for (let i = 0; i < totalLines; i += batchSize) {
         const chunk = subtitles.slice(i, i + batchSize);
         
-        const response = await fetch("/api/autocorrect-subtitles", {
+        const subtitleLinesPrompt = chunk.map((s: any) => `Line ${s.id}: "${s.translatedText || s.text}"`).join("\n");
+        const systemInstruction = `You are a Persian language expert. Your task is to correct the orthography, punctuation, and half-spaces (نیم‌فاصله) of the provided Persian subtitle lines.\nCRITICAL RULES:\n1. DO NOT change the meaning or translate the text. Only correct grammar, punctuation, and typography (e.g., changing spaces to half-spaces where appropriate like "می روم" to "می‌روم").\n2. Return the response STRICTLY as a JSON object with a \corrections key containing an array of objects with keys \id (integer matching the input) and \correctedText (string). Do not include any explanations.\n\nResponse JSON Schema structure:\n{\n  "corrections": [\n    { "id": 1, "correctedText": "متن اصلاح‌شده با نیم‌فاصله‌ها" }\n  ]\n}`;
+
+        const response = await fetch("http://localhost:11434/api/chat", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
-            subtitles: chunk,
             model: selectedModel,
+            messages: [
+              { role: "system", content: systemInstruction },
+              { role: "user", content: `Correct the following Persian subtitle lines:\n\n${subtitleLinesPrompt}` }
+            ],
+            stream: false,
+            format: "json"
           }),
         });
 
         if (!response.ok) {
-          const errData = await response.json();
-          throw new Error(errData.error || "خطا در اصلاح دسته اول زیرنویس‌ها.");
+          throw new Error("خطا در اصلاح دسته اول زیرنویس‌ها با Ollama.");
         }
 
         const data = await response.json();
-        if (data.success && data.correctedSubtitles) {
-          // Merge corrected block
-          data.correctedSubtitles.forEach((correctedItem: SubtitleLine) => {
+        const content = data.message?.content || "{}";
+        let parsedData: any = {};
+        try {
+          const jsonMatch = content.match(/\{[\s\S]*\}/);
+          parsedData = jsonMatch ? JSON.parse(jsonMatch[0]) : JSON.parse(content);
+        } catch (e) { console.error("Parse Error"); }
+
+        const correctedResults = parsedData.corrections || [];
+        if (correctedResults.length > 0) {
+          correctedResults.forEach((correctedItem: any) => {
             const index = updatedSubtitles.findIndex(item => item.id === correctedItem.id);
             if (index !== -1) {
-              updatedSubtitles[index] = {
-                ...updatedSubtitles[index],
-                translatedText: correctedItem.translatedText,
-              };
+              updatedSubtitles[index] = { ...updatedSubtitles[index], text: updatedSubtitles[index].text, translatedText: correctedItem.correctedText };
             }
           });
-
-          // Iterative updates for a smooth live editing presentation
-          setSubtitles([...updatedSubtitles]);
-          setAutocorrectProgress(Math.min(100, Math.round(((i + chunk.length) / totalLines) * 100)));
         }
-      }
 
-      setSuccess("اصلاح قواعد نگارشی کل زیرنویس با موفقیت به پایان رسید!");
+        setSubtitles([...updatedSubtitles]);
+        setAutocorrectProgress(Math.min(100, Math.round(((i + batchSize) / totalLines) * 100)));
+      }
+      setSuccess("فرآیند اصلاح خودکار نگارشی با موفقیت به پایان رسید.");
     } catch (err: any) {
-      setError(err.message || "خطایی در فرآیند اصلاح رخ داد.");
+      setError(err.message || "خطا در اصلاح نیم‌فاصله‌ها.");
     } finally {
       setIsAutocorrecting(false);
+      setAutocorrectProgress(100);
     }
   };
 
@@ -458,25 +495,19 @@ export default function App() {
     setError(null);
     setSuccess(null);
     try {
-      const res = await fetch("/api/validate-key", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-      });
+      const res = await fetch("http://localhost:11434/api/tags");
+      if (!res.ok) throw new Error("Ollama is not responding.");
       const data = await res.json();
-      if (res.ok && data.success) {
-        if (data.models) {
-           setAvailableModels(data.models);
-           if (data.models.length > 0 && !data.models.find((m: any) => m.name === selectedModel)) {
-             setSelectedModel(data.models[0].name);
-           }
+      if (data.models) {
+        setAvailableModels(data.models);
+        if (data.models.length > 0 && !data.models.find((m: any) => m.name === selectedModel)) {
+          setSelectedModel(data.models[0].name);
         }
-        setSuccess("سنجش موفقیت‌آمیز بود! ارتباط با Ollama با موفقیت برقرار شد.");
-        setIsApiConfigOpen(false);
-      } else {
-        setError(data.error || "موتور Ollama در دسترس نیست.");
       }
+      setSuccess("ارتباط با Ollama با موفقیت برقرار شد. مدل‌ها دریافت شدند.");
+      setIsApiConfigOpen(false);
     } catch (err: any) {
-      setError("خطا در برقراری ارتباط با سرور برای سنجش موتور Ollama.");
+      setError("خطا در اتصال به Ollama. مطمئن شوید برنامه در حال اجراست و متغیر OLLAMA_ORIGINS=\"*\" تنظیم شده است.");
     } finally {
       setIsValidatingKey(false);
     }
@@ -726,23 +757,17 @@ export default function App() {
                 </div>
 
                 <div className="flex flex-col gap-2 bg-black/20 p-3 rounded-3xl border border-teal-900/20">
-                  <span className="text-[10px] font-bold text-slate-400">موتورهای جستجو (متصل به اینترنت):</span>
-                  <div className="flex flex-wrap gap-3 text-[10px] text-slate-300">
-                    <label className="flex items-center gap-1.5 cursor-pointer hover:text-white transition-colors">
-                      <input type="checkbox" checked={selectedEngines.opensubtitles} onChange={() => toggleEngine('opensubtitles')} className="accent-teal-500 w-3 h-3" /> OpenSubtitles
-                    </label>
-                    <label className="flex items-center gap-1.5 cursor-pointer hover:text-white transition-colors">
-                      <input type="checkbox" checked={selectedEngines.subscene} onChange={() => toggleEngine('subscene')} className="accent-teal-500 w-3 h-3" /> Subscene
-                    </label>
-                    <label className="flex items-center gap-1.5 cursor-pointer hover:text-white transition-colors">
-                      <input type="checkbox" checked={selectedEngines.yify} onChange={() => toggleEngine('yify')} className="accent-teal-500 w-3 h-3" /> YIFY
-                    </label>
-                    <label className="flex items-center gap-1.5 cursor-pointer hover:text-white transition-colors">
-                      <input type="checkbox" checked={selectedEngines.addic7ed} onChange={() => toggleEngine('addic7ed')} className="accent-teal-500 w-3 h-3" /> Addic7ed
-                    </label>
-                    <label className="flex items-center gap-1.5 cursor-pointer hover:text-white transition-colors font-semibold text-teal-400">
-                      <input type="checkbox" checked={selectedEngines.google} onChange={() => toggleEngine('google')} className="accent-teal-500 w-3 h-3" /> جستجوی گوگل (Google)
-                    </label>
+                  <span className="text-[10px] font-bold text-slate-400">موتور جستجوی OpenSubtitles.com</span>
+                  <div className="flex flex-col gap-1.5">
+                    <label className="text-[10px] text-slate-400">کلید API (جهت دانلود واقعی زیرنویس):</label>
+                    <input 
+                      type="password" 
+                      value={openSubtitlesApiKey} 
+                      onChange={(e) => changeApiKey(e.target.value)} 
+                      placeholder="YOUR_OPENSUBTITLES_API_KEY"
+                      className="w-full bg-black/40 border border-teal-900/30 text-xs text-white rounded-3xl px-3 py-1.5 outline-none focus:border-teal-500 font-mono"
+                    />
+                    <a href="https://www.opensubtitles.com/en/consumers" target="_blank" rel="noreferrer" className="text-[9px] text-teal-400 hover:underline">دریافت رایگان کلید API از OpenSubtitles</a>
                   </div>
                 </div>
               </form>
@@ -764,7 +789,8 @@ export default function App() {
                         </div>
                         <div className="flex items-center justify-between text-[10px] text-slate-400 mt-1">
                           <div className="flex items-center gap-2">
-                            <span className="font-mono">تعداد خطوط: {res.linesCount}</span>
+                            <span className="font-mono">دانلودها: {res.downloadCount || "-"}</span>
+                            <span className="font-mono">فریم‌ریت: {res.fps || "-"}</span>
                             {res.source && (
                               <span className="bg-white/5 border border-teal-900/30 px-1.5 py-0.5 rounded text-slate-300">
                                 منبع: {res.source}
@@ -1142,10 +1168,10 @@ export default function App() {
         {/* Info guide section */}
         <footer className="mt-12 text-center text-slate-500 text-xs leading-relaxed max-w-2xl mx-auto border-t border-teal-900/20 pt-6 flex flex-col gap-1.5">
           <p className="font-bold text-slate-400">راهنما و ویژگی‌های کلیدی زیرنویس‌یاب هوشمند فارسی</p>
-          <p>امکان جستجوی خودکار زیرنویس‌ها بر اساس نام فیلم، بارگذاری با درگ اند دراپ، ویرایش خط به خط ترجمه با رابط بومی‌سازی شده‌ی جذاب و روان فارسی در این MVP گنجانده شده است.</p>
-          <p className="font-mono text-slate-600 mt-2">© 2026 Persian Subtitle Finder system (Ollama Edition). Powered by Local Ollama Models.</p>
+          <p>این برنامه با استفاده از API قدرتمند OpenSubtitles، زیرنویس‌های واقعی و معتبر را برای فیلم و سریال‌های شما پیدا کرده و دانلود می‌کند.</p>
+          <p>شما می‌توانید کلید API رایگان خود را از سایت OpenSubtitles دریافت کرده و سپس به کمک مدل‌های قدرتمند Ollama زیرنویس‌ها را به فارسی روان و با در نظر گرفتن لحن و فضای داستان، ترجمه و حتی نیم‌فاصله‌های آن را تصحیح کنید.</p>
+          <p className="font-mono text-slate-600 mt-2">© 2026 Persian Subtitle Finder system (OpenSubtitles & Ollama Edition).</p>
         </footer>
-
       </div>
     </div>
   );
