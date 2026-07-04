@@ -83,6 +83,18 @@ export default function App() {
     localStorage.setItem("persian_sub_model", val);
   };
 
+  const [selectedEngines, setSelectedEngines] = useState({
+    opensubtitles: true,
+    subscene: true,
+    yify: true,
+    addic7ed: true,
+    google: false
+  });
+
+  const toggleEngine = (engine: keyof typeof selectedEngines) => {
+    setSelectedEngines(prev => ({ ...prev, [engine]: !prev[engine] }));
+  };
+
   const [movieName, setMovieName] = useState<string>("");
   const [searchResults, setSearchResults] = useState<SubtitleSearchResult[]>([]);
   const [selectedResultId, setSelectedResultId] = useState<string | null>(null);
@@ -103,7 +115,9 @@ export default function App() {
   // App Utilities / Progress States
   const [isSearching, setIsSearching] = useState<boolean>(false);
   const [isTranslating, setIsTranslating] = useState<boolean>(false);
+  const [isAutocorrecting, setIsAutocorrecting] = useState<boolean>(false);
   const [translationProgress, setTranslationProgress] = useState<number>(0);
+  const [autocorrectProgress, setAutocorrectProgress] = useState<number>(0);
   
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
@@ -211,7 +225,7 @@ export default function App() {
       const response = await fetch("/api/search-subtitles", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ movieName, model: selectedModel }),
+        body: JSON.stringify({ movieName, model: selectedModel, engines: selectedEngines }),
       });
 
       if (!response.ok) {
@@ -301,6 +315,67 @@ export default function App() {
       setError(err.message || "خطایی در فرآیند ترجمه رخ داد.");
     } finally {
       setIsTranslating(false);
+    }
+  };
+
+  // Autocorrect with AI (Batch based logic)
+  const handleAutocorrectWithAI = async () => {
+    if (subtitles.length === 0) {
+      setError("هیچ زیرنویسی برای اصلاح بارگذاری نشده است.");
+      return;
+    }
+
+    setIsAutocorrecting(true);
+    setAutocorrectProgress(0);
+    setError(null);
+    setSuccess(null);
+
+    const batchSize = 35; // Batch size optimized for faster context corrections
+    const totalLines = subtitles.length;
+    let updatedSubtitles = [...subtitles];
+
+    try {
+      for (let i = 0; i < totalLines; i += batchSize) {
+        const chunk = subtitles.slice(i, i + batchSize);
+        
+        const response = await fetch("/api/autocorrect-subtitles", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            subtitles: chunk,
+            model: selectedModel,
+          }),
+        });
+
+        if (!response.ok) {
+          const errData = await response.json();
+          throw new Error(errData.error || "خطا در اصلاح دسته اول زیرنویس‌ها.");
+        }
+
+        const data = await response.json();
+        if (data.success && data.correctedSubtitles) {
+          // Merge corrected block
+          data.correctedSubtitles.forEach((correctedItem: SubtitleLine) => {
+            const index = updatedSubtitles.findIndex(item => item.id === correctedItem.id);
+            if (index !== -1) {
+              updatedSubtitles[index] = {
+                ...updatedSubtitles[index],
+                translatedText: correctedItem.translatedText,
+              };
+            }
+          });
+
+          // Iterative updates for a smooth live editing presentation
+          setSubtitles([...updatedSubtitles]);
+          setAutocorrectProgress(Math.min(100, Math.round(((i + chunk.length) / totalLines) * 100)));
+        }
+      }
+
+      setSuccess("اصلاح قواعد نگارشی کل زیرنویس با موفقیت به پایان رسید!");
+    } catch (err: any) {
+      setError(err.message || "خطایی در فرآیند اصلاح رخ داد.");
+    } finally {
+      setIsAutocorrecting(false);
     }
   };
 
@@ -419,7 +494,7 @@ export default function App() {
   };
 
   return (
-    <div className="min-h-screen relative overflow-x-hidden font-sans pb-16 bg-[#0a0f1d] selection:bg-purple-600 selection:text-white">
+    <div className="min-h-screen relative overflow-x-hidden font-sans pb-16 bg-[#0a0f1d] selection:bg-teal-600 selection:text-white">
       {/* Cinematic Persepolis (Takht-e Jamshid) Background Overlay */}
       <div 
         className="fixed inset-0 z-0 pointer-events-none opacity-20 mix-blend-overlay bg-cover bg-center blur-[3px]"
@@ -450,11 +525,11 @@ export default function App() {
               initial={{ opacity: 0, y: -20 }}
               animate={{ opacity: 1, y: 0 }}
               exit={{ opacity: 0, y: -20 }}
-              className="mb-6 flex items-center gap-3 p-4 bg-purple-950/65 border border-purple-800/80 rounded-xl text-purple-100 shadow-xl backdrop-blur-md"
+              className="mb-6 flex items-center gap-3 p-4 bg-teal-950/65 border border-teal-800/80 rounded-xl text-teal-100 shadow-xl backdrop-blur-md"
             >
-              <CheckCircle2 className="w-5 h-5 text-purple-400 shrink-0" />
+              <CheckCircle2 className="w-5 h-5 text-teal-400 shrink-0" />
               <div className="text-sm font-medium">{success}</div>
-              <button onClick={() => setSuccess(null)} className="mr-auto text-xs bg-purple-900/40 hover:bg-purple-800/60 px-3 py-1 rounded-lg transition-all">بستن</button>
+              <button onClick={() => setSuccess(null)} className="mr-auto text-xs bg-teal-900/40 hover:bg-teal-800/60 px-3 py-1 rounded-lg transition-all">بستن</button>
             </motion.div>
           )}
         </AnimatePresence>
@@ -462,15 +537,20 @@ export default function App() {
         {/* Top Navbar / Header */}
         <header className="flex flex-col sm:flex-row items-center justify-between gap-4 pb-8 mb-8 border-b border-white/5">
           <div className="flex items-center gap-4">
-            <div className="w-12 h-12 rounded-2xl bg-gradient-to-tr from-purple-600 to-indigo-500 flex items-center justify-center shadow-lg shadow-purple-500/20">
-              <Languages className="w-6 h-6 text-white" />
+            <div className="relative w-14 h-14 rounded-2xl bg-gradient-to-tr from-teal-600 to-cyan-700 flex items-center justify-center shadow-lg shadow-teal-500/20 overflow-hidden border border-teal-400/30">
+              {/* Persian Geometric Pattern Overlay */}
+              <svg className="absolute inset-0 w-full h-full opacity-20 pointer-events-none" viewBox="0 0 100 100" preserveAspectRatio="none">
+                <polygon points="50,0 60,35 100,50 60,65 50,100 40,65 0,50 40,35" fill="currentColor" className="text-white" />
+                <polygon points="15,15 50,25 85,15 75,50 85,85 50,75 15,85 25,50" fill="none" stroke="currentColor" strokeWidth="2" className="text-white" />
+              </svg>
+              <Languages className="w-6 h-6 text-white relative z-10" />
             </div>
             <div className="text-right">
-              <h1 className="text-2xl font-black tracking-tight text-white flex items-center gap-2">
-                <span>زیرنویس‌یاب و مترجم فارسی</span>
-                <span className="text-xs font-semibold bg-purple-600/30 text-purple-300 border border-purple-500/30 px-2 py-0.5 rounded-full">هوشمند</span>
+              <h1 className="text-3xl font-black tracking-tight text-transparent bg-clip-text bg-gradient-to-l from-white via-teal-100 to-teal-400 flex items-center gap-3">
+                <span>زیرنویس‌یاب و مترجم پارسی</span>
+                <span className="text-[10px] font-bold bg-teal-900/50 text-teal-300 border border-teal-500/30 px-2.5 py-1 rounded-full shadow-inner">الگوریتم هوشمند</span>
               </h1>
-              <p className="text-xs text-slate-400 tracking-wide font-mono mt-0.5">Persian Subtitle Finder & AI Translator</p>
+              <p className="text-xs text-teal-500/70 tracking-widest font-mono mt-1 font-semibold uppercase">Persian Subtitle Finder & AI Translator</p>
             </div>
           </div>
 
@@ -502,7 +582,7 @@ export default function App() {
 
             {/* Panel 1: API Config Panel */}
             <section id="api-config" className="bg-[#12182b]/60 backdrop-blur-xl border border-white/10 rounded-2xl p-5 shadow-xl relative overflow-hidden group">
-              <div className="absolute top-0 right-0 w-32 h-32 bg-purple-600/5 rounded-full blur-2xl group-hover:bg-purple-600/10 transition-all pointer-events-none" />
+              <div className="absolute top-0 right-0 w-32 h-32 bg-teal-600/5 rounded-full blur-2xl group-hover:bg-teal-600/10 transition-all pointer-events-none" />
               
               <div 
                 className="flex items-center justify-between mb-2 pb-3 border-b border-white/5 cursor-pointer"
@@ -510,7 +590,7 @@ export default function App() {
                 title="کلیک کنید تا کادر تنظیمات جمع یا باز شود"
               >
                 <h2 className="text-sm font-bold text-white flex items-center gap-2">
-                  <Cpu className="w-4 h-4 text-purple-400" />
+                  <Cpu className="w-4 h-4 text-teal-400" />
                   <span>تنظیمات هوش مصنوعی</span>
                   {!isApiConfigOpen && (
                     <span className="text-[9px] bg-emerald-500/15 text-emerald-400 border border-emerald-500/20 px-2 py-0.5 rounded-full flex items-center gap-1 font-bold animate-pulse">
@@ -528,13 +608,13 @@ export default function App() {
               {isApiConfigOpen ? (
                 <div className="flex flex-col gap-4 mt-4">
                   {/* Ollama Card */}
-                  <div className="p-4 rounded-xl border bg-purple-950/20 border-purple-500/50 shadow-lg shadow-purple-500/5">
+                  <div className="p-4 rounded-xl border bg-teal-950/20 border-teal-500/50 shadow-lg shadow-teal-500/5">
                     <div className="flex items-center justify-between mb-3">
                        <div className="flex items-center gap-2">
-                         <span className="w-2.5 h-2.5 rounded-full bg-purple-400 animate-pulse" />
+                         <span className="w-2.5 h-2.5 rounded-full bg-teal-400 animate-pulse" />
                          <span className="text-xs font-bold text-white">موتور Ollama (کاملاً محلی و آفلاین)</span>
                        </div>
-                       <span className="text-[10px] bg-purple-500/20 text-purple-300 px-2 py-0.5 rounded-full font-bold">فعال</span>
+                       <span className="text-[10px] bg-teal-500/20 text-teal-300 px-2 py-0.5 rounded-full font-bold">فعال</span>
                      </div>
  
                      {/* Model Selector */}
@@ -543,7 +623,7 @@ export default function App() {
                        <select 
                          value={selectedModel}
                          onChange={(e) => changeModel(e.target.value)}
-                         className="w-full bg-black/60 border border-white/10 text-xs text-white rounded-xl px-2.5 py-1.5 outline-none focus:border-purple-500"
+                         className="w-full bg-black/60 border border-white/10 text-xs text-white rounded-xl px-2.5 py-1.5 outline-none focus:border-teal-500"
                        >
                          <option value="llama3.1">llama3.1 (پیشنهادی - دقیق و پایدار)</option>
                          <option value="llama3.2">llama3.2 (جدیدترین مدل سبک)</option>
@@ -559,7 +639,7 @@ export default function App() {
                        type="button"
                        onClick={validateOllamaConnection}
                        disabled={isValidatingKey}
-                       className="w-full bg-purple-600/20 hover:bg-purple-600/30 text-purple-300 hover:text-purple-200 border border-purple-500/30 font-bold py-1.5 px-3 rounded-lg flex items-center justify-center gap-1.5 transition-all text-[11px] cursor-pointer active:scale-[0.98]"
+                       className="w-full bg-teal-600/20 hover:bg-teal-600/30 text-teal-300 hover:text-teal-200 border border-teal-500/30 font-bold py-1.5 px-3 rounded-lg flex items-center justify-center gap-1.5 transition-all text-[11px] cursor-pointer active:scale-[0.98]"
                      >
                        {isValidatingKey ? (
                          <RefreshCw className="w-3 h-3 animate-spin" />
@@ -575,7 +655,7 @@ export default function App() {
                   <button 
                     type="button"
                     onClick={() => setIsApiConfigOpen(true)}
-                    className="text-[10px] text-purple-400 hover:text-purple-300 font-bold hover:underline transition-all"
+                    className="text-[10px] text-teal-400 hover:text-teal-300 font-bold hover:underline transition-all"
                   >
                     برای باز کردن تنظیمات موتور کلیک کنید
                   </button>
@@ -585,11 +665,11 @@ export default function App() {
 
             {/* Panel 2: Subtitle Search Panel (MAIN FEATURE) */}
             <section className="bg-[#12182b]/60 backdrop-blur-xl border border-white/10 rounded-2xl p-5 shadow-xl relative overflow-hidden group">
-              <div className="absolute top-0 right-0 w-32 h-32 bg-purple-600/5 rounded-full blur-2xl group-hover:bg-purple-600/10 transition-all pointer-events-none" />
+              <div className="absolute top-0 right-0 w-32 h-32 bg-teal-600/5 rounded-full blur-2xl group-hover:bg-teal-600/10 transition-all pointer-events-none" />
               
               <div className="flex items-center justify-between mb-4 border-b border-white/5 pb-3">
                 <h2 className="text-sm font-bold text-white flex items-center gap-2">
-                  <Film className="w-4 h-4 text-purple-400" />
+                  <Film className="w-4 h-4 text-teal-400" />
                   <span>جستجوگر آنلاین زیرنویس</span>
                 </h2>
                 <span className="text-xs text-slate-400 font-mono">Subtitle Search</span>
@@ -606,13 +686,13 @@ export default function App() {
                         placeholder="نام فیلم یا ویدیو را به انگلیسی یا فارسی وارد کنید..." 
                         value={movieName}
                         onChange={(e) => setMovieName(e.target.value)}
-                        className="w-full bg-black/30 border border-white/10 rounded-xl pr-9 pl-3 py-2.5 text-xs text-white placeholder-slate-500 focus:border-purple-500 focus:ring-1 focus:ring-purple-500 outline-none transition-all"
+                        className="w-full bg-black/30 border border-white/10 rounded-xl pr-9 pl-3 py-2.5 text-xs text-white placeholder-slate-500 focus:border-teal-500 focus:ring-1 focus:ring-teal-500 outline-none transition-all"
                       />
                     </div>
                     <button 
                       type="submit"
                       disabled={isSearching}
-                      className="bg-purple-600 hover:bg-purple-500 disabled:bg-purple-800 text-white text-xs font-bold px-4 py-2.5 rounded-xl flex items-center gap-1.5 transition-all shadow-lg shadow-purple-600/20 active:scale-95 cursor-pointer shrink-0"
+                      className="bg-teal-600 hover:bg-teal-500 disabled:bg-teal-800 text-white text-xs font-bold px-4 py-2.5 rounded-xl flex items-center gap-1.5 transition-all shadow-lg shadow-teal-600/20 active:scale-95 cursor-pointer shrink-0"
                     >
                       {isSearching ? (
                         <RefreshCw className="w-4 h-4 animate-spin" />
@@ -634,6 +714,27 @@ export default function App() {
                     )}
                   </div>
                 </div>
+
+                <div className="flex flex-col gap-2 bg-black/20 p-3 rounded-xl border border-white/5">
+                  <span className="text-[10px] font-bold text-slate-400">موتورهای جستجو (متصل به اینترنت):</span>
+                  <div className="flex flex-wrap gap-3 text-[10px] text-slate-300">
+                    <label className="flex items-center gap-1.5 cursor-pointer hover:text-white transition-colors">
+                      <input type="checkbox" checked={selectedEngines.opensubtitles} onChange={() => toggleEngine('opensubtitles')} className="accent-teal-500 w-3 h-3" /> OpenSubtitles
+                    </label>
+                    <label className="flex items-center gap-1.5 cursor-pointer hover:text-white transition-colors">
+                      <input type="checkbox" checked={selectedEngines.subscene} onChange={() => toggleEngine('subscene')} className="accent-teal-500 w-3 h-3" /> Subscene
+                    </label>
+                    <label className="flex items-center gap-1.5 cursor-pointer hover:text-white transition-colors">
+                      <input type="checkbox" checked={selectedEngines.yify} onChange={() => toggleEngine('yify')} className="accent-teal-500 w-3 h-3" /> YIFY
+                    </label>
+                    <label className="flex items-center gap-1.5 cursor-pointer hover:text-white transition-colors">
+                      <input type="checkbox" checked={selectedEngines.addic7ed} onChange={() => toggleEngine('addic7ed')} className="accent-teal-500 w-3 h-3" /> Addic7ed
+                    </label>
+                    <label className="flex items-center gap-1.5 cursor-pointer hover:text-white transition-colors font-semibold text-teal-400">
+                      <input type="checkbox" checked={selectedEngines.google} onChange={() => toggleEngine('google')} className="accent-teal-500 w-3 h-3" /> جستجوی گوگل (Google)
+                    </label>
+                  </div>
+                </div>
               </form>
 
               {/* Search Results Display */}
@@ -645,11 +746,11 @@ export default function App() {
                       <div 
                         key={`res-${res.id}-${idx}`}
                         onClick={() => loadSearchResult(res)}
-                        className={`p-3 rounded-xl border text-right transition-all cursor-pointer flex flex-col gap-1.5 ${selectedResultId === res.id ? "bg-purple-950/40 border-purple-500/80 shadow-md" : "bg-black/20 border-white/5 hover:border-purple-500/30"}`}
+                        className={`p-3 rounded-xl border text-right transition-all cursor-pointer flex flex-col gap-1.5 ${selectedResultId === res.id ? "bg-teal-950/40 border-teal-500/80 shadow-md" : "bg-black/20 border-white/5 hover:border-teal-500/30"}`}
                       >
                         <div className="flex justify-between items-start gap-2">
-                          <span className="text-xs font-bold text-purple-200 line-clamp-1">{res.fileName}</span>
-                          <span className="text-[10px] bg-purple-900/40 text-purple-300 px-2 py-0.5 rounded font-medium shrink-0">{res.language}</span>
+                          <span className="text-xs font-bold text-teal-200 line-clamp-1">{res.fileName}</span>
+                          <span className="text-[10px] bg-teal-900/40 text-teal-300 px-2 py-0.5 rounded font-medium shrink-0">{res.language}</span>
                         </div>
                         <div className="flex items-center justify-between text-[10px] text-slate-400 mt-1">
                           <div className="flex items-center gap-2">
@@ -660,7 +761,7 @@ export default function App() {
                               </span>
                             )}
                           </div>
-                          <span className="text-purple-400 font-semibold flex items-center gap-0.5">
+                          <span className="text-teal-400 font-semibold flex items-center gap-0.5">
                             <Check className="w-3 h-3" /> انتخاب و بارگذاری
                           </span>
                         </div>
@@ -675,7 +776,7 @@ export default function App() {
             <section className="bg-[#12182b]/60 backdrop-blur-xl border border-white/10 rounded-2xl p-5 shadow-xl relative overflow-hidden">
               <div className="flex items-center justify-between mb-4 border-b border-white/5 pb-3">
                 <h2 className="text-sm font-bold text-white flex items-center gap-2">
-                  <Upload className="w-4 h-4 text-purple-400" />
+                  <Upload className="w-4 h-4 text-teal-400" />
                   <span>وارد کردن فایل زیرنویس</span>
                 </h2>
                 <span className="text-xs text-slate-400 font-mono">Import SRT</span>
@@ -686,7 +787,7 @@ export default function App() {
                 onDragOver={handleDragOver}
                 onDragLeave={handleDragLeave}
                 onDrop={handleDrop}
-                className={`p-6 border-2 border-dashed rounded-xl flex flex-col items-center justify-center text-center transition-all cursor-pointer ${isDragging ? "border-purple-500 bg-purple-500/5" : "border-white/10 hover:border-purple-500/30 bg-black/10"}`}
+                className={`p-6 border-2 border-dashed rounded-xl flex flex-col items-center justify-center text-center transition-all cursor-pointer ${isDragging ? "border-teal-500 bg-teal-500/5" : "border-white/10 hover:border-teal-500/30 bg-black/10"}`}
                 onClick={() => fileInputRef.current?.click()}
               >
                 <input 
@@ -696,7 +797,7 @@ export default function App() {
                   onChange={handleFileChange}
                   className="hidden" 
                 />
-                <Upload className="w-8 h-8 text-purple-400 mb-2 animate-pulse" />
+                <Upload className="w-8 h-8 text-teal-400 mb-2 animate-pulse" />
                 <p className="text-xs font-bold text-slate-200">فایل SRT را بکشید و رها کنید</p>
                 <p className="text-[10px] text-slate-500 mt-1">یا جهت جستجوی دستی کلیک کنید</p>
               </div>
@@ -708,7 +809,7 @@ export default function App() {
                   onClick={() => setShowPasteArea(!showPasteArea)}
                   className="w-full bg-black/30 hover:bg-black/50 border border-white/5 text-[11px] text-slate-300 py-2 rounded-xl flex items-center justify-center gap-1.5 transition-all"
                 >
-                  <FileText className="w-3.5 h-3.5 text-purple-400" />
+                  <FileText className="w-3.5 h-3.5 text-teal-400" />
                   <span>{showPasteArea ? "بستن کادر درج دستی" : "پیست کردن متن زیرنویس به صورت دستی"}</span>
                 </button>
               </div>
@@ -720,13 +821,13 @@ export default function App() {
                     placeholder="متن کامل زیرنویس با فرمت SRT را در اینجا قرار دهید..."
                     value={pastedText}
                     onChange={(e) => setPastedText(e.target.value)}
-                    className="w-full bg-black/30 border border-white/10 rounded-xl p-3 text-xs text-white placeholder-slate-600 focus:border-purple-500 outline-none font-mono"
+                    className="w-full bg-black/30 border border-white/10 rounded-xl p-3 text-xs text-white placeholder-slate-600 focus:border-teal-500 outline-none font-mono"
                     dir="ltr"
                   />
                   <button 
                     type="button"
                     onClick={handlePasteSubmit}
-                    className="bg-purple-600 hover:bg-purple-500 text-white text-xs font-bold py-2 rounded-xl transition-all"
+                    className="bg-teal-600 hover:bg-teal-500 text-white text-xs font-bold py-2 rounded-xl transition-all"
                   >
                     تجزیه و اعمال زیرنویس دستی
                   </button>
@@ -743,7 +844,7 @@ export default function App() {
             <section className="bg-[#12182b]/60 backdrop-blur-xl border border-white/10 rounded-2xl p-5 shadow-xl relative overflow-hidden">
               <div className="flex items-center justify-between mb-4 border-b border-white/5 pb-3">
                 <h2 className="text-sm font-bold text-white flex items-center gap-2">
-                  <Sliders className="w-4 h-4 text-purple-400" />
+                  <Sliders className="w-4 h-4 text-teal-400" />
                   <span>تنظیمات و بهینه‌سازی موتور ترجمه</span>
                 </h2>
                 <span className="text-xs text-slate-400 font-mono">Engine Config</span>
@@ -754,55 +855,55 @@ export default function App() {
                 <div className="bg-black/20 p-3 rounded-xl border border-white/5 flex flex-col gap-1.5 justify-between">
                   <div className="flex items-center justify-between">
                     <span className="text-xs font-bold text-slate-200">حفظ دقیق زمان‌بندی</span>
-                    <span className="text-[9px] bg-purple-900/40 text-purple-300 px-1 rounded">پیش‌فرض</span>
+                    <span className="text-[9px] bg-teal-900/40 text-teal-300 px-1 rounded">پیش‌فرض</span>
                   </div>
                   <p className="text-[10px] text-slate-500 leading-relaxed">قالب و نشانگرهای زمانی SRT کاملا ایمن باقی می‌مانند.</p>
                   <label className="relative inline-flex items-center cursor-pointer mt-1">
                     <input type="checkbox" checked={preserveTiming} readOnly className="sr-only peer" />
-                    <div className="w-8 h-4 bg-purple-600 rounded-full peer peer-checked:after:translate-x-full after:content-[''] after:absolute after:top-0.5 after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-3 after:w-3 after:transition-all peer-checked:bg-purple-600" />
+                    <div className="w-8 h-4 bg-teal-600 rounded-full peer peer-checked:after:translate-x-full after:content-[''] after:absolute after:top-0.5 after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-3 after:w-3 after:transition-all peer-checked:bg-teal-600" />
                   </label>
                 </div>
 
                 <div className="bg-black/20 p-3 rounded-xl border border-white/5 flex flex-col gap-1.5 justify-between">
                   <div className="flex items-center justify-between">
                     <span className="text-xs font-bold text-slate-200">بومی‌سازی روان فارسی</span>
-                    <span className="text-[9px] bg-purple-900/40 text-purple-300 px-1 rounded">روشن</span>
+                    <span className="text-[9px] bg-teal-900/40 text-teal-300 px-1 rounded">روشن</span>
                   </div>
                   <p className="text-[10px] text-slate-500 leading-relaxed">ترجمه روان محاوره‌ای ایرانی به جای ترجمه تحت‌اللفظی.</p>
                   <label className="relative inline-flex items-center cursor-pointer mt-1">
                     <input type="checkbox" checked={naturalLocalization} onChange={() => setNaturalLocalization(!naturalLocalization)} className="sr-only peer" />
-                    <div className="w-8 h-4 bg-slate-700 rounded-full peer peer-checked:after:translate-x-full after:content-[''] after:absolute after:top-0.5 after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-3 after:w-3 after:transition-all peer-checked:bg-purple-600" />
+                    <div className="w-8 h-4 bg-slate-700 rounded-full peer peer-checked:after:translate-x-full after:content-[''] after:absolute after:top-0.5 after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-3 after:w-3 after:transition-all peer-checked:bg-teal-600" />
                   </label>
                 </div>
 
                 <div className="bg-black/20 p-3 rounded-xl border border-white/5 flex flex-col gap-1.5 justify-between">
                   <div className="flex items-center justify-between">
                     <span className="text-xs font-bold text-slate-200">حفظ پیوستگی دیالوگ‌ها</span>
-                    <span className="text-[9px] bg-purple-900/40 text-purple-300 px-1 rounded">روشن</span>
+                    <span className="text-[9px] bg-teal-900/40 text-teal-300 px-1 rounded">روشن</span>
                   </div>
                   <p className="text-[10px] text-slate-500 leading-relaxed">درک روابط و کنایه‌های بین خطوط پی‌درپی گفتگوها.</p>
                   <label className="relative inline-flex items-center cursor-pointer mt-1">
                     <input type="checkbox" checked={contextAwareMode} onChange={() => setContextAwareMode(!contextAwareMode)} className="sr-only peer" />
-                    <div className="w-8 h-4 bg-slate-700 rounded-full peer peer-checked:after:translate-x-full after:content-[''] after:absolute after:top-0.5 after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-3 after:w-3 after:transition-all peer-checked:bg-purple-600" />
+                    <div className="w-8 h-4 bg-slate-700 rounded-full peer peer-checked:after:translate-x-full after:content-[''] after:absolute after:top-0.5 after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-3 after:w-3 after:transition-all peer-checked:bg-teal-600" />
                   </label>
                 </div>
               </div>
 
               {/* Translation Trigger Section */}
-              <div className="bg-[#1c1d3c]/30 border border-purple-500/20 rounded-xl p-4 flex flex-col gap-3">
+              <div className="bg-[#1c1d3c]/30 border border-teal-500/20 rounded-xl p-4 flex flex-col gap-3">
                 <div className="flex justify-between items-center text-xs">
                   <span className="text-slate-300 font-bold flex items-center gap-1.5">
-                    <Sparkles className="w-4 h-4 text-purple-400" />
+                    <Sparkles className="w-4 h-4 text-teal-400" />
                     <span>مجموعاً {totalSubCount} خط آماده‌ی ترجمه است</span>
                   </span>
-                  <span className="text-slate-400">پیشرفت کل: <span className="font-mono text-purple-400 font-bold">{translationPercentage}%</span></span>
+                  <span className="text-slate-400">پیشرفت کل: <span className="font-mono text-teal-400 font-bold">{translationPercentage}%</span></span>
                 </div>
 
                 <button 
                   type="button"
                   disabled={isTranslating || totalSubCount === 0}
                   onClick={handleTranslateWithAI}
-                  className="w-full bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-500 hover:to-indigo-500 disabled:from-purple-900 disabled:to-indigo-900 text-white font-bold py-3 px-4 rounded-xl flex items-center justify-center gap-2 transition-all shadow-lg shadow-purple-600/10 hover:shadow-purple-600/30 active:scale-[0.99] cursor-pointer"
+                  className="w-full bg-gradient-to-r from-teal-600 to-cyan-600 hover:from-teal-500 hover:to-cyan-500 disabled:from-teal-900 disabled:to-cyan-900 text-white font-bold py-3 px-4 rounded-xl flex items-center justify-center gap-2 transition-all shadow-lg shadow-teal-600/10 hover:shadow-teal-600/30 active:scale-[0.99] cursor-pointer"
                 >
                   {isTranslating ? (
                     <RefreshCw className="w-5 h-5 animate-spin" />
@@ -812,18 +913,32 @@ export default function App() {
                   <span>ترجمه هوشمند کل زیرنویس با هوش مصنوعی (Farsi translation)</span>
                 </button>
 
+                <button 
+                  type="button"
+                  disabled={isAutocorrecting || totalSubCount === 0 || isTranslating}
+                  onClick={handleAutocorrectWithAI}
+                  className="w-full bg-slate-800 hover:bg-slate-700 disabled:bg-slate-900 disabled:text-slate-600 border border-white/5 text-slate-300 font-bold py-2.5 px-4 rounded-xl flex items-center justify-center gap-2 transition-all active:scale-[0.99] cursor-pointer text-xs mt-2"
+                >
+                  {isAutocorrecting ? (
+                    <RefreshCw className="w-4 h-4 animate-spin text-teal-400" />
+                  ) : (
+                    <Sparkles className="w-4 h-4 text-teal-400" />
+                  )}
+                  <span>اصلاح خودکار قواعد نگارشی و نیم‌فاصله‌ها با Ollama</span>
+                </button>
+
                 {/* Live Progress Bar */}
-                {isTranslating && (
+                {(isTranslating || isAutocorrecting) && (
                   <div className="flex flex-col gap-1 mt-1.5">
                     <div className="w-full h-1.5 bg-black/40 rounded-full overflow-hidden">
                       <div 
-                        className="h-full bg-purple-500 rounded-full transition-all duration-300"
-                        style={{ width: `${translationProgress}%` }}
+                        className="h-full bg-teal-500 rounded-full transition-all duration-300"
+                        style={{ width: `${isTranslating ? translationProgress : autocorrectProgress}%` }}
                       />
                     </div>
-                    <div className="flex justify-between text-[10px] text-purple-300">
-                      <span>در حال ارسال دسته‌های موازی به مدل...</span>
-                      <span>{translationProgress}%</span>
+                    <div className="flex justify-between text-[10px] text-teal-300">
+                      <span>{isTranslating ? "در حال ارسال دسته‌های موازی به مدل..." : "در حال بررسی و اصلاح خطوط..."}</span>
+                      <span>{isTranslating ? translationProgress : autocorrectProgress}%</span>
                     </div>
                   </div>
                 )}
@@ -835,14 +950,14 @@ export default function App() {
               
               <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-white/5 pb-3">
                 <div className="flex items-center gap-2">
-                  <FileText className="w-4 h-4 text-purple-400" />
+                  <FileText className="w-4 h-4 text-teal-400" />
                   <h2 className="text-sm font-bold text-white">ویرایشگر و لیست زمانی خطوط زیرنویس</h2>
                 </div>
                 
                 {/* Statistics chips */}
                 <div className="flex gap-2 text-[10px]">
                   <span className="bg-slate-900 text-slate-300 border border-white/5 px-2.5 py-1 rounded-lg">کل خطوط: {totalSubCount}</span>
-                  <span className="bg-purple-900/30 text-purple-300 border border-purple-500/20 px-2.5 py-1 rounded-lg">ترجمه شده: {translatedSubCount}</span>
+                  <span className="bg-teal-900/30 text-teal-300 border border-teal-500/20 px-2.5 py-1 rounded-lg">ترجمه شده: {translatedSubCount}</span>
                 </div>
               </div>
 
@@ -854,7 +969,7 @@ export default function App() {
                   placeholder="جستجو و فیلتر خطوط بر اساس متن اصلی یا ترجمه..."
                   value={filterQuery}
                   onChange={(e) => setFilterQuery(e.target.value)}
-                  className="w-full bg-black/20 border border-white/5 hover:border-white/10 rounded-xl pr-9 pl-3 py-2 text-xs text-white placeholder-slate-500 focus:border-purple-500 focus:ring-1 focus:ring-purple-500 outline-none transition-all"
+                  className="w-full bg-black/20 border border-white/5 hover:border-white/10 rounded-xl pr-9 pl-3 py-2 text-xs text-white placeholder-slate-500 focus:border-teal-500 focus:ring-1 focus:ring-teal-500 outline-none transition-all"
                 />
               </div>
 
@@ -875,17 +990,17 @@ export default function App() {
                         onClick={() => setActiveIndex(index)}
                         className={`p-4 rounded-xl border text-right transition-all duration-200 cursor-text relative overflow-hidden ${
                           isActive 
-                            ? "bg-purple-950/20 border-purple-500 shadow-md shadow-purple-500/5 ring-1 ring-purple-500" 
+                            ? "bg-teal-950/20 border-teal-500 shadow-md shadow-teal-500/5 ring-1 ring-teal-500" 
                             : "bg-black/20 border-white/5 hover:bg-white/5 hover:border-white/10"
                         }`}
                       >
                         {/* Glow indicator for active row */}
                         {isActive && (
-                          <div className="absolute right-0 top-0 bottom-0 w-1 bg-purple-500" />
+                          <div className="absolute right-0 top-0 bottom-0 w-1 bg-teal-500" />
                         )}
 
                         <div className="flex justify-between items-center mb-2.5 text-xs text-slate-400">
-                          <span className="font-mono text-[10px] bg-black/40 border border-white/5 px-2 py-0.5 rounded text-purple-300">
+                          <span className="font-mono text-[10px] bg-black/40 border border-white/5 px-2 py-0.5 rounded text-teal-300">
                             {sub.startTime} ── {sub.endTime}
                           </span>
                           <span className="font-mono text-[10px] font-bold text-slate-400">خط {sub.id}</span>
@@ -904,7 +1019,7 @@ export default function App() {
                               value={sub.translatedText || ""}
                               onChange={(e) => handleTextEdit(sub.id, e.target.value)}
                               placeholder="ترجمه فارسی این خط را در اینجا وارد یا ویرایش کنید..."
-                              className="w-full bg-black/40 text-xs text-white border border-purple-500/40 focus:border-purple-500 rounded-lg p-2.5 outline-none font-sans leading-relaxed text-right"
+                              className="w-full bg-black/40 text-xs text-white border border-teal-500/40 focus:border-teal-500 rounded-lg p-2.5 outline-none font-sans leading-relaxed text-right"
                               dir="rtl"
                               autoFocus
                             />
@@ -925,7 +1040,7 @@ export default function App() {
                                     e.stopPropagation();
                                     setActiveIndex(null);
                                   }}
-                                  className="text-[10px] text-purple-300 bg-purple-950/40 border border-purple-800/40 px-2 py-1 rounded hover:bg-purple-900/40 transition-all cursor-pointer flex items-center gap-0.5"
+                                  className="text-[10px] text-teal-300 bg-teal-950/40 border border-teal-800/40 px-2 py-1 rounded hover:bg-teal-900/40 transition-all cursor-pointer flex items-center gap-0.5"
                                 >
                                   <Check className="w-3 h-3" />
                                   <span>تایید و ذخیره</span>
@@ -934,7 +1049,7 @@ export default function App() {
                             </div>
                           </div>
                         ) : (
-                          <p className={`text-xs font-sans leading-relaxed pr-1 ${sub.translatedText ? "text-purple-200" : "text-slate-600 italic"}`}>
+                          <p className={`text-xs font-sans leading-relaxed pr-1 ${sub.translatedText ? "text-teal-200" : "text-slate-600 italic"}`}>
                             {sub.translatedText || "... در انتظار ترجمه هوشمند ..."}
                           </p>
                         )}
@@ -949,7 +1064,7 @@ export default function App() {
             <section className="bg-[#12182b]/60 backdrop-blur-xl border border-white/10 rounded-2xl p-5 shadow-xl flex flex-col gap-4">
               <div className="flex items-center justify-between border-b border-white/5 pb-3">
                 <h2 className="text-sm font-bold text-white flex items-center gap-2">
-                  <Download className="w-4 h-4 text-purple-400" />
+                  <Download className="w-4 h-4 text-teal-400" />
                   <span>خروجی گرفتن و دانلود زیرنویس نهایی</span>
                 </h2>
                 <span className="text-xs text-slate-400 font-mono">Export Suite</span>
@@ -960,7 +1075,7 @@ export default function App() {
                   type="button"
                   onClick={handleDownloadSRT}
                   disabled={subtitles.length === 0}
-                  className="flex-1 bg-purple-600 hover:bg-purple-500 disabled:bg-purple-950 disabled:text-slate-500 text-white font-bold py-3 px-4 rounded-xl flex items-center justify-center gap-2 transition-all shadow-lg shadow-purple-600/10 active:scale-95 cursor-pointer text-xs"
+                  className="flex-1 bg-teal-600 hover:bg-teal-500 disabled:bg-teal-950 disabled:text-slate-500 text-white font-bold py-3 px-4 rounded-xl flex items-center justify-center gap-2 transition-all shadow-lg shadow-teal-600/10 active:scale-95 cursor-pointer text-xs"
                 >
                   <Download className="w-4.5 h-4.5" />
                   <span>دانلود فایل نهایی SRT فارسی</span>
@@ -972,7 +1087,7 @@ export default function App() {
                   disabled={subtitles.length === 0}
                   className="bg-slate-800 hover:bg-slate-700 disabled:bg-slate-950 disabled:text-slate-600 border border-white/5 text-slate-200 font-bold py-3 px-4 rounded-xl flex items-center justify-center gap-2 transition-all active:scale-95 cursor-pointer text-xs"
                 >
-                  <Download className="w-4 h-4 text-purple-400" />
+                  <Download className="w-4 h-4 text-teal-400" />
                   <span>دانلود زیرنویس اصلی</span>
                 </button>
 
@@ -994,7 +1109,7 @@ export default function App() {
                   disabled={subtitles.length === 0}
                   className="bg-slate-800 hover:bg-slate-700 disabled:bg-slate-950 disabled:text-slate-600 border border-white/5 text-slate-200 font-bold py-3 px-4 rounded-xl flex items-center justify-center gap-2 transition-all active:scale-95 cursor-pointer text-xs"
                 >
-                  <FileJson className="w-4 h-4 text-purple-400" />
+                  <FileJson className="w-4 h-4 text-teal-400" />
                   <span>خروجی JSON</span>
                 </button>
 
