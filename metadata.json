@@ -1,5 +1,5 @@
 {
-  "name": "Persian Subtitle Finder (Groq Edition)",
+  "name": "Persian Subtitle Finder (Ollama Edition)",
   "description": "جستجوگر و مترجم هوشمند زیرنویس به فارسی روان ایرانی با حفظ زمان‌بندی دقیق",
   "requestFramePermissions": [],
   "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]

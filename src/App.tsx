@@ -74,20 +74,9 @@ const DEFAULT_SUBTITLES: SubtitleLine[] = [
 
 export default function App() {
   // Core State
-  const [groqApiKey, setGroqApiKey] = useState<string>(() => {
-    return localStorage.getItem("persian_sub_groq_key") || localStorage.getItem("persian_sub_api_key") || "";
-  });
   const [selectedModel, setSelectedModel] = useState<string>(() => {
-    return localStorage.getItem("persian_sub_model") || "llama-3.3-70b-versatile";
+    return localStorage.getItem("persian_sub_model") || "llama3.1";
   });
-
-  const apiKey = groqApiKey;
-
-  const changeGroqKey = (val: string) => {
-    setGroqApiKey(val);
-    localStorage.setItem("persian_sub_groq_key", val);
-    localStorage.setItem("persian_sub_api_key", val);
-  };
 
   const changeModel = (val: string) => {
     setSelectedModel(val);
@@ -120,19 +109,14 @@ export default function App() {
   const [success, setSuccess] = useState<string | null>(null);
   
   // Collapsible settings & validation state
-  const [isApiConfigOpen, setIsApiConfigOpen] = useState<boolean>(() => {
-    return !localStorage.getItem("persian_sub_api_key") && !localStorage.getItem("persian_sub_groq_key");
-  });
+  const [isApiConfigOpen, setIsApiConfigOpen] = useState<boolean>(true);
   const [isValidatingKey, setIsValidatingKey] = useState<boolean>(false);
 
   // Drag & drop state
   const [isDragging, setIsDragging] = useState<boolean>(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  // Auto-save API Key to localStorage
-  useEffect(() => {
-    localStorage.setItem("persian_sub_api_key", apiKey);
-  }, [apiKey]);
+  // Auto-save logic removed since API Key is not needed
 
   // Handle Drag Events for subtitle imports
   const handleDragOver = (e: React.DragEvent) => {
@@ -227,7 +211,7 @@ export default function App() {
       const response = await fetch("/api/search-subtitles", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ movieName, customKey: apiKey, model: selectedModel }),
+        body: JSON.stringify({ movieName, model: selectedModel }),
       });
 
       if (!response.ok) {
@@ -282,7 +266,6 @@ export default function App() {
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
             subtitles: chunk,
-            customKey: apiKey,
             model: selectedModel,
             contextMode: contextAwareMode,
             localizationMode: naturalLocalization,
@@ -389,12 +372,8 @@ export default function App() {
     return originalMatch || translatedMatch;
   });
 
-  // Validate API key with the Express server
-  const validateApiKey = async () => {
-    if (!groqApiKey) {
-      setError("لطفاً ابتدا کلید API خود را وارد کنید.");
-      return;
-    }
+  // Validate Ollama connection with the Express server
+  const validateOllamaConnection = async () => {
     setIsValidatingKey(true);
     setError(null);
     setSuccess(null);
@@ -402,19 +381,16 @@ export default function App() {
       const res = await fetch("/api/validate-key", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ customKey: groqApiKey }),
       });
       const data = await res.json();
       if (res.ok && data.success) {
-        setSuccess("سنجش موفقیت‌آمیز بود! کلید API با موفقیت تایید و فعال شد.");
-        localStorage.setItem("persian_sub_groq_key", groqApiKey);
-        localStorage.setItem("persian_sub_api_key", groqApiKey);
+        setSuccess("سنجش موفقیت‌آمیز بود! ارتباط با Ollama با موفقیت برقرار شد.");
         setIsApiConfigOpen(false);
       } else {
-        setError(data.error || "کلید وارد شده نامعتبر است یا کار نمی‌کند.");
+        setError(data.error || "موتور Ollama در دسترس نیست.");
       }
     } catch (err: any) {
-      setError("خطا در برقراری ارتباط با سرور برای سنجش کلید.");
+      setError("خطا در برقراری ارتباط با سرور برای سنجش موتور Ollama.");
     } finally {
       setIsValidatingKey(false);
     }
@@ -439,7 +415,7 @@ export default function App() {
     setPastedText("");
     setShowPasteArea(false);
     setError(null);
-    setSuccess("حافظه موقت و لیست زیرنویس‌ها پاکسازی شدند (کلید هوش مصنوعی شما جهت آسودگی کار حفظ شد).");
+    setSuccess("حافظه موقت و لیست زیرنویس‌ها پاکسازی شدند.");
   };
 
   return (
@@ -503,7 +479,7 @@ export default function App() {
               type="button"
               onClick={handleResetCache}
               className="flex items-center gap-1.5 text-xs bg-red-500/10 hover:bg-red-500/20 text-red-400 hover:text-red-300 border border-red-500/25 px-3 py-1.5 rounded-xl transition-all cursor-pointer font-bold active:scale-95"
-              title="پاکسازی زیرنویس‌ها و تنظیمات موقت (بدون حذف کلید API)"
+              title="پاکسازی زیرنویس‌ها و تنظیمات موقت"
             >
               <Trash2 className="w-3.5 h-3.5" />
               <span>بازنشانی حافظه موقت</span>
@@ -536,7 +512,7 @@ export default function App() {
                 <h2 className="text-sm font-bold text-white flex items-center gap-2">
                   <Cpu className="w-4 h-4 text-purple-400" />
                   <span>تنظیمات هوش مصنوعی</span>
-                  {!isApiConfigOpen && groqApiKey && (
+                  {!isApiConfigOpen && (
                     <span className="text-[9px] bg-emerald-500/15 text-emerald-400 border border-emerald-500/20 px-2 py-0.5 rounded-full flex items-center gap-1 font-bold animate-pulse">
                       <span className="w-1.5 h-1.5 rounded-full bg-emerald-400" />
                       آماده
@@ -551,58 +527,48 @@ export default function App() {
 
               {isApiConfigOpen ? (
                 <div className="flex flex-col gap-4 mt-4">
-                  {/* Groq Card */}
+                  {/* Ollama Card */}
                   <div className="p-4 rounded-xl border bg-purple-950/20 border-purple-500/50 shadow-lg shadow-purple-500/5">
                     <div className="flex items-center justify-between mb-3">
-                      <div className="flex items-center gap-2">
-                        <span className="w-2.5 h-2.5 rounded-full bg-purple-400 animate-pulse" />
-                        <span className="text-xs font-bold text-white">موتور Groq (تسهیل‌کننده ترجمه فوق‌سریع)</span>
-                      </div>
-                      <span className="text-[10px] bg-purple-500/20 text-purple-300 px-2 py-0.5 rounded-full font-bold">فعال</span>
-                    </div>
-                    
-                    <div className="relative mb-2.5">
-                      <input 
-                        type="password" 
-                        placeholder="کلید API گرک (Groq API Key) را وارد کنید..."
-                        value={groqApiKey}
-                        onChange={(e) => changeGroqKey(e.target.value)}
-                        className="w-full bg-black/40 border border-white/10 rounded-xl px-3 py-2 text-xs text-white placeholder-slate-500 focus:border-purple-500 outline-none transition-all"
-                      />
-                      {groqApiKey && (
-                        <Check className="w-3.5 h-3.5 text-emerald-400 absolute left-3 top-2.5" />
-                      )}
-                    </div>
-
-                    {/* Model Selector */}
-                    <div className="mb-3">
-                      <label className="block text-[10px] font-semibold text-slate-400 mb-1.5">انتخاب مدل هوش مصنوعی Groq:</label>
-                      <select 
-                        value={selectedModel}
-                        onChange={(e) => changeModel(e.target.value)}
-                        className="w-full bg-black/60 border border-white/10 text-xs text-white rounded-xl px-2.5 py-1.5 outline-none focus:border-purple-500"
-                      >
-                        <option value="llama-3.3-70b-versatile">llama-3.3-70b-versatile (قوی‌ترین - پیشنهادی)</option>
-                        <option value="llama-3.1-70b-versatile">llama-3.1-70b-versatile (پایدار و دقیق)</option>
-                        <option value="llama-3.1-8b-instant">llama-3.1-8b-instant (بسیار سریع و اقتصادی)</option>
-                        <option value="mixtral-8x7b">mixtral-8x7b (مدل ترکیبی قدرتمند)</option>
-                      </select>
-                    </div>
-                    
-                    <button
-                      type="button"
-                      onClick={validateApiKey}
-                      disabled={isValidatingKey}
-                      className="w-full bg-purple-600/20 hover:bg-purple-600/30 text-purple-300 hover:text-purple-200 border border-purple-500/30 font-bold py-1.5 px-3 rounded-lg flex items-center justify-center gap-1.5 transition-all text-[11px] cursor-pointer active:scale-[0.98]"
-                    >
-                      {isValidatingKey ? (
-                        <RefreshCw className="w-3 h-3 animate-spin" />
-                      ) : (
-                        <CheckCircle2 className="w-3.5 h-3.5" />
-                      )}
-                      <span>سنجش صحت کلید Groq</span>
-                    </button>
-                  </div>
+                       <div className="flex items-center gap-2">
+                         <span className="w-2.5 h-2.5 rounded-full bg-purple-400 animate-pulse" />
+                         <span className="text-xs font-bold text-white">موتور Ollama (کاملاً محلی و آفلاین)</span>
+                       </div>
+                       <span className="text-[10px] bg-purple-500/20 text-purple-300 px-2 py-0.5 rounded-full font-bold">فعال</span>
+                     </div>
+ 
+                     {/* Model Selector */}
+                     <div className="mb-3">
+                       <label className="block text-[10px] font-semibold text-slate-400 mb-1.5">انتخاب مدل هوش مصنوعی Ollama:</label>
+                       <select 
+                         value={selectedModel}
+                         onChange={(e) => changeModel(e.target.value)}
+                         className="w-full bg-black/60 border border-white/10 text-xs text-white rounded-xl px-2.5 py-1.5 outline-none focus:border-purple-500"
+                       >
+                         <option value="llama3.1">llama3.1 (پیشنهادی - دقیق و پایدار)</option>
+                         <option value="llama3.2">llama3.2 (جدیدترین مدل سبک)</option>
+                         <option value="llama3">llama3 (کلاسیک)</option>
+                         <option value="mistral">mistral (سریع و قدرتمند)</option>
+                         <option value="mixtral">mixtral (ترکیبی پیشرفته)</option>
+                         <option value="qwen2">qwen2 (چندزبانه حرفه‌ای)</option>
+                         <option value="gemma">gemma (مدل باز گوگل - Gamma)</option>
+                       </select>
+                     </div>
+                     
+                     <button
+                       type="button"
+                       onClick={validateOllamaConnection}
+                       disabled={isValidatingKey}
+                       className="w-full bg-purple-600/20 hover:bg-purple-600/30 text-purple-300 hover:text-purple-200 border border-purple-500/30 font-bold py-1.5 px-3 rounded-lg flex items-center justify-center gap-1.5 transition-all text-[11px] cursor-pointer active:scale-[0.98]"
+                     >
+                       {isValidatingKey ? (
+                         <RefreshCw className="w-3 h-3 animate-spin" />
+                       ) : (
+                         <CheckCircle2 className="w-3.5 h-3.5" />
+                       )}
+                       <span>بررسی وضعیت Ollama (Localhost:11434)</span>
+                     </button>
+                   </div>
                 </div>
               ) : (
                 <div className="text-center mt-2.5">
@@ -611,7 +577,7 @@ export default function App() {
                     onClick={() => setIsApiConfigOpen(true)}
                     className="text-[10px] text-purple-400 hover:text-purple-300 font-bold hover:underline transition-all"
                   >
-                    برای تغییر کلید API یا تنظیمات کلیک کنید
+                    برای باز کردن تنظیمات موتور کلیک کنید
                   </button>
                 </div>
               )}
@@ -1005,6 +971,28 @@ export default function App() {
 
                 <button 
                   type="button"
+                  onClick={() => {
+                    const jsonString = JSON.stringify(subtitles, null, 2);
+                    const blob = new Blob([jsonString], { type: "application/json" });
+                    const url = URL.createObjectURL(blob);
+                    const link = document.createElement("a");
+                    link.href = url;
+                    link.download = `Subtitles_${movieName ? movieName.replace(/\s+/g, "_") : "Data"}.json`;
+                    document.body.appendChild(link);
+                    link.click();
+                    document.body.removeChild(link);
+                    URL.revokeObjectURL(url);
+                    setSuccess("فایل JSON برای توسعه‌دهندگان با موفقیت دانلود شد.");
+                  }}
+                  disabled={subtitles.length === 0}
+                  className="bg-slate-800 hover:bg-slate-700 disabled:bg-slate-950 disabled:text-slate-600 border border-white/5 text-slate-200 font-bold py-3 px-4 rounded-xl flex items-center justify-center gap-2 transition-all active:scale-95 cursor-pointer text-xs"
+                >
+                  <FileJson className="w-4 h-4 text-purple-400" />
+                  <span>خروجی JSON</span>
+                </button>
+
+                <button 
+                  type="button"
                   onClick={handleCopyToClipboard}
                   disabled={subtitles.length === 0}
                   className="bg-black/30 hover:bg-black/50 border border-white/5 text-slate-300 text-xs font-bold py-3 px-5 rounded-xl flex items-center justify-center gap-1.5 transition-all cursor-pointer active:scale-95"
@@ -1023,7 +1011,7 @@ export default function App() {
         <footer className="mt-12 text-center text-slate-500 text-xs leading-relaxed max-w-2xl mx-auto border-t border-white/5 pt-6 flex flex-col gap-1.5">
           <p className="font-bold text-slate-400">راهنما و ویژگی‌های کلیدی زیرنویس‌یاب هوشمند فارسی</p>
           <p>امکان جستجوی خودکار زیرنویس‌ها بر اساس نام فیلم، بارگذاری با درگ اند دراپ، ویرایش خط به خط ترجمه با رابط بومی‌سازی شده‌ی جذاب و روان فارسی در این MVP گنجانده شده است.</p>
-          <p className="font-mono text-slate-600 mt-2">© 2026 Persian Subtitle Finder system (Groq Edition). Powered by Groq AI Models.</p>
+          <p className="font-mono text-slate-600 mt-2">© 2026 Persian Subtitle Finder system (Ollama Edition). Powered by Local Ollama Models.</p>
         </footer>
 
       </div>

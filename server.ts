@@ -12,13 +12,17 @@ const PORT = 3000;
 app.use(express.json({ limit: "20mb" }));
 app.use(express.urlencoded({ extended: true, limit: "20mb" }));
 
-// Helper to retrieve the Groq API key
-function getGroqApiKey(customKey?: string) {
-  const key = customKey || process.env.GROQ_API_KEY;
-  if (!key) {
-    throw new Error("کلید API یافت نشد. لطفاً در پنل تنظیمات کلید معتبر Groq وارد کنید.");
+// Helper to check if Ollama is running
+async function checkOllamaRunning() {
+  try {
+    const response = await fetch("http://localhost:11434/api/tags");
+    if (!response.ok) {
+      throw new Error("Cannot connect to Ollama.");
+    }
+    return await response.json();
+  } catch (error) {
+    throw new Error("خطا در اتصال به Ollama. لطفاً مطمئن شوید که Ollama روی سیستم شما در حال اجرا است (http://localhost:11434)");
   }
-  return key;
 }
 
 // 1. Healthcheck Endpoint
@@ -26,59 +30,29 @@ app.get("/api/health", (req, res) => {
   res.json({ status: "ok", time: new Date().toISOString() });
 });
 
-// 1b. Validate API Key Endpoint
+// 1b. Validate Ollama Endpoint
 app.post("/api/validate-key", async (req, res) => {
   try {
-    const { customKey } = req.body;
-    const apiKey = getGroqApiKey(customKey);
-    
-    const response = await fetch("https://api.groq.com/openai/v1/chat/completions", {
-      method: "POST",
-      headers: {
-        "Authorization": `Bearer ${apiKey}`,
-        "Content-Type": "application/json"
-      },
-      body: JSON.stringify({
-        model: "llama-3.1-8b-instant",
-        messages: [
-          { role: "user", content: "Respond with the word: ok" }
-        ],
-        max_tokens: 5
-      })
-    });
-
-    if (!response.ok) {
-      const errText = await response.text();
-      let errMsg = "کلید وارد شده معتبر نمی‌باشد یا خطایی در اتصال رخ داده است.";
-      try {
-        const parsed = JSON.parse(errText);
-        if (parsed.error && parsed.error.message) {
-          errMsg = parsed.error.message;
-        }
-      } catch (e) {}
-      return res.status(400).json({ success: false, error: errMsg });
-    }
-
-    return res.json({ success: true, message: "کلید Groq با موفقیت سنجش شد و متصل گردید." });
+    const data = await checkOllamaRunning();
+    return res.json({ success: true, message: "ارتباط با Ollama با موفقیت برقرار شد.", models: data.models });
   } catch (error: any) {
-    console.error("Error validating API key:", error);
+    console.error("Error validating Ollama:", error);
     return res.status(400).json({ 
       success: false, 
-      error: error.message || "کلید وارد شده معتبر نمی‌باشد یا خطایی در اتصال رخ داده است." 
+      error: error.message || "خطا در اتصال به موتور محلی Ollama." 
     });
   }
 });
 
-// 2. Search and retrieve matching subtitles using Groq
+// 2. Search and retrieve matching subtitles using Ollama
 app.post("/api/search-subtitles", async (req, res) => {
   try {
-    const { movieName, customKey, model } = req.body;
+    const { movieName, model } = req.body;
     if (!movieName) {
       return res.status(400).json({ error: "لطفاً نام فیلم را وارد کنید." });
     }
 
-    const apiKey = getGroqApiKey(customKey);
-    const selectedModel = model || "llama-3.3-70b-versatile";
+    const selectedModel = model || "llama3.1";
 
     const prompt = `Generate 35 consecutive, iconic dialogue lines from the movie or video named "${movieName}".
     Return them as a JSON object with a "lines" key containing an array of subtitle objects in the original language of the film.
@@ -88,10 +62,9 @@ app.post("/api/search-subtitles", async (req, res) => {
     - endTime (string in subtitle timestamp format 'HH:MM:SS,mmm' e.g. '00:05:15,150')
     - text (string, the original dialogue text)`;
 
-    const response = await fetch("https://api.groq.com/openai/v1/chat/completions", {
+    const response = await fetch("http://localhost:11434/api/chat", {
       method: "POST",
       headers: {
-        "Authorization": `Bearer ${apiKey}`,
         "Content-Type": "application/json"
       },
       body: JSON.stringify({
@@ -106,17 +79,18 @@ app.post("/api/search-subtitles", async (req, res) => {
             content: prompt
           }
         ],
-        response_format: { type: "json_object" }
+        stream: false,
+        format: "json"
       })
     });
 
     if (!response.ok) {
       const errText = await response.text();
-      return res.status(500).json({ error: `Groq API Error: ${errText}` });
+      return res.status(500).json({ error: `Ollama API Error: ${errText}` });
     }
 
     const data = await response.json();
-    const content = data.choices?.[0]?.message?.content || "{}";
+    const content = data.message?.content || "{}";
     const parsedData = JSON.parse(content);
     const parsedLines = parsedData.lines || [];
 
@@ -158,13 +132,12 @@ app.post("/api/search-subtitles", async (req, res) => {
 // 3. AI translation endpoint
 app.post("/api/translate-subtitles", async (req, res) => {
   try {
-    const { subtitles, customKey, model } = req.body;
+    const { subtitles, model } = req.body;
     if (!subtitles || !Array.isArray(subtitles) || subtitles.length === 0) {
       return res.status(400).json({ error: "لیست زیرنویس‌ها خالی است." });
     }
 
-    const apiKey = getGroqApiKey(customKey);
-    const selectedModel = model || "llama-3.3-70b-versatile";
+    const selectedModel = model || "llama3.1";
 
     const subtitleLinesPrompt = subtitles.map((s: any) => `Line ${s.id}: "${s.text}"`).join("\n");
     
@@ -187,10 +160,9 @@ Response JSON Schema structure:
   ]
 }`;
 
-    const response = await fetch("https://api.groq.com/openai/v1/chat/completions", {
+    const response = await fetch("http://localhost:11434/api/chat", {
       method: "POST",
       headers: {
-        "Authorization": `Bearer ${apiKey}`,
         "Content-Type": "application/json"
       },
       body: JSON.stringify({
@@ -205,17 +177,18 @@ Response JSON Schema structure:
             content: `Translate the following consecutive subtitle lines using the 2-3 line semantic chunking strategy:\n\n${subtitleLinesPrompt}`
           }
         ],
-        response_format: { type: "json_object" }
+        stream: false,
+        format: "json"
       })
     });
 
     if (!response.ok) {
       const errText = await response.text();
-      return res.status(500).json({ error: `Groq API Error: ${errText}` });
+      return res.status(500).json({ error: `Ollama API Error: ${errText}` });
     }
 
     const data = await response.json();
-    const content = data.choices?.[0]?.message?.content || "{}";
+    const content = data.message?.content || "{}";
     const parsedData = JSON.parse(content);
     const translatedResults = parsedData.translations || [];
 
