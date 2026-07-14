@@ -98,9 +98,12 @@ export default function App() {
     setProvider(val);
     localStorage.setItem("persian_sub_provider", val);
     if (val === "cerebras") {
-      setAvailableModels([]);
-      setIsCerebrasConfigOpen(true);
+      setAvailableModels([{name: "llama3.1-8b"}, {name: "llama3.1-70b"}]);
+      setSelectedModel("llama3.1-8b");
+      setIsCerebrasConfigOpen(!cerebrasApiKey);
     } else {
+      setSelectedModel("llama3.1");
+      setAvailableModels([]);
       validateOllamaConnection();
     }
   };
@@ -323,6 +326,11 @@ export default function App() {
       setError("هیچ زیرنویسی برای ترجمه بارگذاری نشده است.");
       return;
     }
+    if (provider === "cerebras" && (!cerebrasApiKey || cerebrasApiKey.trim() === "")) {
+      setError("لطفاً ابتدا کلید API سرویس Cerebras را در تنظیمات وارد کنید.");
+      setIsCerebrasConfigOpen(true);
+      return;
+    }
 
     setIsTranslating(true);
     setTranslationProgress(0);
@@ -389,6 +397,11 @@ export default function App() {
   const handleAutocorrectWithAI = async () => {
     if (subtitles.length === 0) {
       setError("هیچ زیرنویسی برای اصلاح بارگذاری نشده است.");
+      return;
+    }
+    if (provider === "cerebras" && (!cerebrasApiKey || cerebrasApiKey.trim() === "")) {
+      setError("لطفاً ابتدا کلید API سرویس Cerebras را در تنظیمات وارد کنید.");
+      setIsCerebrasConfigOpen(true);
       return;
     }
 
