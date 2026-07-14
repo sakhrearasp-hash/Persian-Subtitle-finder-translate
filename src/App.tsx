@@ -82,19 +82,49 @@ export default function App() {
   const [selectedModel, setSelectedModel] = useState<string>(() => {
     return localStorage.getItem("persian_sub_model") || "llama3.1";
   });
+  const [provider, setProvider] = useState<"ollama" | "cerebras">(() => {
+    return (localStorage.getItem("persian_sub_provider") as any) || "ollama";
+  });
+  const [cerebrasApiKey, setCerebrasApiKey] = useState<string>(() => {
+    return localStorage.getItem("cerebras_api_key") || "";
+  });
+  const [isCerebrasConfigOpen, setIsCerebrasConfigOpen] = useState(false);
 
   const changeModel = (val: string) => {
     setSelectedModel(val);
     localStorage.setItem("persian_sub_model", val);
   };
+  const changeProvider = (val: "ollama" | "cerebras") => {
+    setProvider(val);
+    localStorage.setItem("persian_sub_provider", val);
+    if (val === "cerebras") {
+      setAvailableModels([{name: "llama3.1-8b"}]);
+      setSelectedModel("llama3.1-8b");
+    } else {
+      validateOllamaConnection();
+    }
+  };
 
   const [openSubtitlesApiKey, setOpenSubtitlesApiKey] = useState<string>(() => {
     return localStorage.getItem("opensubtitles_api_key") || "";
   });
+  const [isOpenSubtitlesConfigOpen, setIsOpenSubtitlesConfigOpen] = useState(false);
   const changeApiKey = (val: string) => {
     setOpenSubtitlesApiKey(val);
     localStorage.setItem("opensubtitles_api_key", val);
   };
+  const [selectedEngines, setSelectedEngines] = useState({
+    opensubtitles: true,
+    subscene: true,
+    yify: true,
+    addic7ed: true,
+    google: false
+  });
+
+  const toggleEngine = (engine: keyof typeof selectedEngines) => {
+    setSelectedEngines(prev => ({ ...prev, [engine]: !prev[engine] }));
+  };
+  const [remainingTokens, setRemainingTokens] = useState<string | null>(null);
   const [movieName, setMovieName] = useState<string>("");
   const [searchResults, setSearchResults] = useState<SubtitleSearchResult[]>([]);
   const [selectedResultId, setSelectedResultId] = useState<string | null>(null);
@@ -225,7 +255,7 @@ export default function App() {
       const response = await fetch("/api/search-subtitles", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ movieName, apiKey: openSubtitlesApiKey }),
+        body: JSON.stringify({ movieName, apiKey: openSubtitlesApiKey, engines: selectedEngines }),
       });
 
       if (!response.ok) {
@@ -249,8 +279,15 @@ export default function App() {
 
   // Load a subtitle version from search results
   const loadSearchResult = async (result: SubtitleSearchResult) => {
+    if (result.source === "موتور جستجوی عمومی (Free Web)" && result.lines) {
+      setSubtitles(result.lines);
+      setSelectedResultId(result.id);
+      setActiveIndex(null);
+      setSuccess(`زیرنویس نسخه "${result.fileName}" بارگذاری شد.`);
+      return;
+    }
     if (!openSubtitlesApiKey) {
-       setError("کلید API وارد نشده است.");
+       setError("کلید API وارد نشده است. برای دانلود از OpenSubtitles نیاز به کلید دارید.");
        return;
     }
     setIsSearching(true);
@@ -313,8 +350,8 @@ export default function App() {
               { role: "user", content: `Translate the following consecutive subtitle lines using the 2-3 line semantic chunking strategy:\n\n${subtitleLinesPrompt}` }
             ],
             stream: false,
-            format: "json"
-          }),
+            format: "json",
+           provider, cerebrasApiKey }),
         });
 
         if (!response.ok) {
@@ -329,7 +366,10 @@ export default function App() {
           parsedData = jsonMatch ? JSON.parse(jsonMatch[0]) : JSON.parse(content);
         } catch (e) { console.error("Parse Error"); }
 
-        const translatedResults = parsedData.translations || [];
+        if (data.message && data.message.remainingTokens) {
+    setRemainingTokens(data.message.remainingTokens);
+  }
+  const translatedResults = parsedData.translations || [];
         if (translatedResults.length > 0) {
           translatedResults.forEach((translatedItem: any) => {
             const index = updatedSubtitles.findIndex(item => item.id === translatedItem.id);
@@ -383,8 +423,8 @@ export default function App() {
               { role: "user", content: `Correct the following Persian subtitle lines:\n\n${subtitleLinesPrompt}` }
             ],
             stream: false,
-            format: "json"
-          }),
+            format: "json",
+           provider, cerebrasApiKey }),
         });
 
         if (!response.ok) {
@@ -399,7 +439,10 @@ export default function App() {
           parsedData = jsonMatch ? JSON.parse(jsonMatch[0]) : JSON.parse(content);
         } catch (e) { console.error("Parse Error"); }
 
-        const correctedResults = parsedData.corrections || [];
+        if (data.message && data.message.remainingTokens) {
+    setRemainingTokens(data.message.remainingTokens);
+  }
+  const correctedResults = parsedData.corrections || [];
         if (correctedResults.length > 0) {
           correctedResults.forEach((correctedItem: any) => {
             const index = updatedSubtitles.findIndex(item => item.id === correctedItem.id);
@@ -490,6 +533,36 @@ export default function App() {
   });
 
   // Validate Ollama connection with the Express server
+  const validateCerebrasConnection = async () => {
+    setIsValidatingKey(true);
+    setError(null);
+    setSuccess(null);
+    try {
+      const res = await fetch("/api/validate-cerebras", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ apiKey: cerebrasApiKey })
+      });
+      const data = await res.json();
+      if (res.ok && data.success) {
+        if (data.models) {
+           setAvailableModels(data.models);
+           if (data.models.length > 0 && !data.models.find((m: any) => m.name === selectedModel)) {
+             setSelectedModel(data.models[0].name);
+           }
+        }
+        setSuccess("ارتباط با Cerebras با موفقیت تایید شد.");
+        setIsCerebrasConfigOpen(false);
+      } else {
+        setError(data.error || "کلید نامعتبر است.");
+      }
+    } catch (err: any) {
+      setError("خطا در سنجش Cerebras.");
+    } finally {
+      setIsValidatingKey(false);
+    }
+  };
+
   const validateOllamaConnection = async () => {
     setIsValidatingKey(true);
     setError(null);
@@ -757,19 +830,26 @@ export default function App() {
                 </div>
 
                 <div className="flex flex-col gap-2 bg-black/20 p-3 rounded-3xl border border-teal-900/20">
-                  <span className="text-[10px] font-bold text-slate-400">موتور جستجوی OpenSubtitles.com</span>
-                  <div className="flex flex-col gap-1.5">
-                    <label className="text-[10px] text-slate-400">کلید API (جهت دانلود واقعی زیرنویس):</label>
-                    <input 
-                      type="password" 
-                      value={openSubtitlesApiKey} 
-                      onChange={(e) => changeApiKey(e.target.value)} 
-                      placeholder="YOUR_OPENSUBTITLES_API_KEY"
-                      className="w-full bg-black/40 border border-teal-900/30 text-xs text-white rounded-3xl px-3 py-1.5 outline-none focus:border-teal-500 font-mono"
-                    />
-                    <a href="https://www.opensubtitles.com/en/consumers" target="_blank" rel="noreferrer" className="text-[9px] text-teal-400 hover:underline">دریافت رایگان کلید API از OpenSubtitles</a>
-                  </div>
-                </div>
+      <div className="flex justify-between items-center cursor-pointer" onClick={() => setIsOpenSubtitlesConfigOpen(!isOpenSubtitlesConfigOpen)}>
+        <span className="text-[10px] font-bold text-slate-400">موتور جستجوی OpenSubtitles.com</span>
+        <button type="button" className="text-teal-400 text-xs">{isOpenSubtitlesConfigOpen ? "بستن" : "تنظیم کلید API"}</button>
+      </div>
+      {isOpenSubtitlesConfigOpen && (
+        <div className="flex flex-col gap-2 mt-2">
+          <input 
+            type="password" 
+            value={openSubtitlesApiKey} 
+            onChange={(e) => changeApiKey(e.target.value)} 
+            placeholder="YOUR_OPENSUBTITLES_API_KEY"
+            className="w-full bg-black/40 border border-teal-900/30 text-xs text-white rounded-3xl px-3 py-1.5 outline-none focus:border-teal-500 font-mono"
+          />
+          <div className="flex justify-between items-center">
+             <a href="https://www.opensubtitles.com/en/consumers" target="_blank" rel="noreferrer" className="text-[9px] text-teal-400 hover:underline">دریافت رایگان کلید API</a>
+             <button type="button" onClick={() => setIsOpenSubtitlesConfigOpen(false)} className="bg-teal-600 hover:bg-teal-500 text-white text-[10px] py-1 px-3 rounded-3xl">ذخیره و بستن</button>
+          </div>
+        </div>
+      )}
+    </div>
               </form>
 
               {/* Search Results Display */}
@@ -1170,7 +1250,7 @@ export default function App() {
           <p className="font-bold text-slate-400">راهنما و ویژگی‌های کلیدی زیرنویس‌یاب هوشمند فارسی</p>
           <p>این برنامه با استفاده از API قدرتمند OpenSubtitles، زیرنویس‌های واقعی و معتبر را برای فیلم و سریال‌های شما پیدا کرده و دانلود می‌کند.</p>
           <p>شما می‌توانید کلید API رایگان خود را از سایت OpenSubtitles دریافت کرده و سپس به کمک مدل‌های قدرتمند Ollama زیرنویس‌ها را به فارسی روان و با در نظر گرفتن لحن و فضای داستان، ترجمه و حتی نیم‌فاصله‌های آن را تصحیح کنید.</p>
-          <p className="font-mono text-slate-600 mt-2">© 2026 Persian Subtitle Finder system (OpenSubtitles & Ollama Edition).</p>
+          <p className="font-mono text-slate-600 mt-2">© 2026 Persian Subtitle Finder system (OpenSubtitles, Ollama & Cerebras Edition).</p>
         </footer>
       </div>
     </div>

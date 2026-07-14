@@ -16,6 +16,8 @@ export interface SubtitleSearchResult {
   downloadCount?: number;
   release?: string;
   fileId?: string;
+  lines?: SubtitleLine[];
+  linesCount?: number;
 }
 
-export type TranslationProvider = "ollama";
+export type TranslationProvider = "ollama" | "cerebras";
