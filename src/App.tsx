@@ -721,23 +721,61 @@ export default function App() {
 
               {isApiConfigOpen ? (
                 <div className="flex flex-col gap-4 mt-4">
-                  {/* Ollama Card */}
-                  <div className="p-4 rounded-3xl border bg-teal-950/20 border-teal-500/50 shadow-lg shadow-teal-500/5">
-                    <div className="flex items-center justify-between mb-3">
+                  <div className="p-4 rounded-3xl border bg-teal-950/20 border-teal-500/50 shadow-lg shadow-teal-500/5 flex flex-col gap-3">
+                    
+                    {/* Provider Selection */}
+                    <div className="flex items-center justify-between">
+                      <span className="text-xs font-bold text-slate-300">انتخاب سرویس هوش مصنوعی:</span>
+                      <select 
+                        value={provider} 
+                        onChange={(e) => changeProvider(e.target.value as any)} 
+                        className="bg-black/40 border border-teal-900/30 text-xs text-teal-300 rounded-3xl px-2.5 py-1.5 outline-none"
+                      >
+                        <option value="ollama">Ollama (Local)</option>
+                        <option value="cerebras">Cerebras (Fast API)</option>
+                      </select>
+                    </div>
+
+                    {provider === "cerebras" && (
+                      <div className="flex flex-col gap-2 mt-2 pt-2 border-t border-teal-500/20">
+                        <div className="flex justify-between items-center cursor-pointer" onClick={() => setIsCerebrasConfigOpen(!isCerebrasConfigOpen)}>
+                          <span className="text-[10px] font-bold text-slate-400">کلید API برای Cerebras</span>
+                          <button type="button" className="text-teal-400 text-xs">{isCerebrasConfigOpen ? "بستن" : "تنظیم کلید"}</button>
+                        </div>
+                        {isCerebrasConfigOpen && (
+                          <div className="flex flex-col gap-2 mt-1">
+                            <input 
+                              type="password" 
+                              value={cerebrasApiKey} 
+                              onChange={(e) => {
+                                setCerebrasApiKey(e.target.value);
+                                localStorage.setItem("cerebras_api_key", e.target.value);
+                              }} 
+                              placeholder="YOUR_CEREBRAS_API_KEY"
+                              className="w-full bg-black/40 border border-teal-900/30 text-xs text-white rounded-3xl px-3 py-1.5 outline-none focus:border-teal-500 font-mono"
+                            />
+                            <button 
+                              type="button" 
+                              onClick={validateCerebrasConnection} 
+                              disabled={isValidatingKey} 
+                              className="bg-teal-600/30 hover:bg-teal-600/50 text-teal-300 text-[10px] py-1.5 px-3 rounded-3xl transition-all"
+                            >
+                              {isValidatingKey ? "در حال بررسی..." : "ذخیره و اعتبارسنجی اتصال"}
+                            </button>
+                          </div>
+                        )}
+                      </div>
+                    )}
+
+                    <div className="flex items-center justify-between mt-1 pt-2 border-t border-teal-500/20">
                        <div className="flex items-center gap-2">
                          <span className="w-2.5 h-2.5 rounded-full bg-teal-400 animate-pulse" />
-                         <span className="text-xs font-bold text-white">موتور Ollama (کاملاً محلی و آفلاین)</span>
+                         <span className="text-[11px] font-bold text-white">مدل فعال:</span>
                        </div>
-                       <span className="text-[10px] bg-teal-500/20 text-teal-300 px-2 py-0.5 rounded-full font-bold">فعال</span>
-                     </div>
- 
-                     {/* Model Selector */}
-                     <div className="mb-3">
-                       <label className="block text-[10px] font-semibold text-slate-400 mb-1.5">انتخاب مدل هوش مصنوعی Ollama:</label>
                        <select
                          value={selectedModel}
                          onChange={(e) => changeModel(e.target.value)}
-                         className="w-full bg-black/60 border border-teal-900/30 text-xs text-white rounded-3xl px-2.5 py-1.5 outline-none focus:border-teal-500"
+                         className="bg-black/60 border border-teal-900/30 text-[11px] text-white rounded-3xl px-2 py-1 outline-none max-w-[150px]"
                        >
                          {availableModels.length > 0 ? (
                            availableModels.map((m: any) => (
@@ -748,20 +786,30 @@ export default function App() {
                          )}
                        </select>
                      </div>
+
+                     {provider === "ollama" && (
+                       <button
+                         type="button"
+                         onClick={validateOllamaConnection}
+                         disabled={isValidatingKey}
+                         className="w-full mt-2 bg-teal-600/20 hover:bg-teal-600/30 text-teal-300 hover:text-teal-300 border border-teal-500/30 font-bold py-1.5 px-3 rounded-xl flex items-center justify-center gap-1.5 transition-all text-[11px] cursor-pointer"
+                       >
+                         {isValidatingKey ? (
+                           <RefreshCw className="w-3 h-3 animate-spin" />
+                         ) : (
+                           <CheckCircle2 className="w-3.5 h-3.5" />
+                         )}
+                         <span>بررسی وضعیت Ollama</span>
+                       </button>
+                     )}
                      
-                     <button
-                       type="button"
-                       onClick={validateOllamaConnection}
-                       disabled={isValidatingKey}
-                       className="w-full bg-teal-600/20 hover:bg-teal-600/30 text-teal-300 hover:text-teal-300 border border-teal-500/30 font-bold py-1.5 px-3 rounded-xl flex items-center justify-center gap-1.5 transition-all text-[11px] cursor-pointer active:scale-[0.98]"
-                     >
-                       {isValidatingKey ? (
-                         <RefreshCw className="w-3 h-3 animate-spin" />
-                       ) : (
-                         <CheckCircle2 className="w-3.5 h-3.5" />
-                       )}
-                       <span>بررسی وضعیت Ollama (Localhost:11434)</span>
-                     </button>
+                     {provider === "cerebras" && remainingTokens && (
+                        <div className="flex justify-between items-center pt-2 mt-1 border-t border-teal-500/20 text-[10px]">
+                          <span className="font-bold text-slate-400">موجودی توکن (دقیقه):</span>
+                          <span className="text-amber-300 font-mono">{remainingTokens}</span>
+                        </div>
+                     )}
+
                    </div>
                 </div>
               ) : (
@@ -830,9 +878,21 @@ export default function App() {
                 </div>
 
                 <div className="flex flex-col gap-2 bg-black/20 p-3 rounded-3xl border border-teal-900/20">
+      <div className="flex flex-col gap-2 border-b border-teal-900/30 pb-2 mb-1">
+        <span className="text-[10px] font-bold text-slate-400">موتورهای جستجو (متصل به اینترنت):</span>
+        <div className="flex flex-wrap gap-3 text-[10px] text-slate-300">
+          <label className="flex items-center gap-1.5 cursor-pointer hover:text-white transition-colors">
+            <input type="checkbox" checked={selectedEngines.opensubtitles} onChange={() => toggleEngine('opensubtitles')} className="accent-teal-500 w-3 h-3" /> OpenSubtitles
+          </label>
+          <label className="flex items-center gap-1.5 cursor-pointer hover:text-white transition-colors font-semibold text-teal-400">
+            <input type="checkbox" checked={selectedEngines.google} onChange={() => toggleEngine('google')} className="accent-teal-500 w-3 h-3" /> جستجوی عمومی وب (بدون نیاز به کلید API)
+          </label>
+        </div>
+      </div>
+
       <div className="flex justify-between items-center cursor-pointer" onClick={() => setIsOpenSubtitlesConfigOpen(!isOpenSubtitlesConfigOpen)}>
-        <span className="text-[10px] font-bold text-slate-400">موتور جستجوی OpenSubtitles.com</span>
-        <button type="button" className="text-teal-400 text-xs">{isOpenSubtitlesConfigOpen ? "بستن" : "تنظیم کلید API"}</button>
+        <span className="text-[10px] font-bold text-slate-400">کلید API برای OpenSubtitles.com</span>
+        <button type="button" className="text-teal-400 text-xs">{isOpenSubtitlesConfigOpen ? "بستن" : "تنظیم"}</button>
       </div>
       {isOpenSubtitlesConfigOpen && (
         <div className="flex flex-col gap-2 mt-2">
@@ -844,7 +904,7 @@ export default function App() {
             className="w-full bg-black/40 border border-teal-900/30 text-xs text-white rounded-3xl px-3 py-1.5 outline-none focus:border-teal-500 font-mono"
           />
           <div className="flex justify-between items-center">
-             <a href="https://www.opensubtitles.com/en/consumers" target="_blank" rel="noreferrer" className="text-[9px] text-teal-400 hover:underline">دریافت رایگان کلید API</a>
+             <a href="https://www.opensubtitles.com/en/consumers" target="_blank" rel="noreferrer" className="text-[9px] text-teal-400 hover:underline">دریافت رایگان کلید</a>
              <button type="button" onClick={() => setIsOpenSubtitlesConfigOpen(false)} className="bg-teal-600 hover:bg-teal-500 text-white text-[10px] py-1 px-3 rounded-3xl">ذخیره و بستن</button>
           </div>
         </div>
